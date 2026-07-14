@@ -102,14 +102,17 @@ export const armazenamentoSupabase: Armazenamento = {
   async listarChaves(): Promise<string[]> {
     const sb = await getSupabase();
     if (!sb) return [];
-    try {
-      const res = (await sb.from(TABELA).select('chave').eq('espaco', ESPACO_DADOS)) as {
-        data: { chave: string }[] | null;
-      };
-      return (res.data ?? []).map((r) => r.chave);
-    } catch {
-      return [];
-    }
+    // IMPORTANTE: não engolir erro aqui devolvendo [] — quem chama (BootNuvem)
+    // usa esta lista para decidir quais chaves locais são "lacunas" seguras de
+    // empurrar sem merge. Uma falha de rede disfarçada de "nuvem vazia" faria
+    // o app achar que TODAS as chaves locais são novas e empurrá-las por cima
+    // do que já existe na nuvem, sem conflito nenhum — foi exatamente assim
+    // que o cardápio da semana foi sobrescrito em 2026-07-14. Deixa o erro
+    // propagar para o chamador abortar a sincronização em vez de arriscar.
+    const res = (await sb.from(TABELA).select('chave').eq('espaco', ESPACO_DADOS)) as {
+      data: { chave: string }[] | null;
+    };
+    return (res.data ?? []).map((r) => r.chave);
   },
 };
 

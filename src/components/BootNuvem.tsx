@@ -167,6 +167,9 @@ export function BootNuvem() {
           // Empurra o que existe SÓ neste aparelho e nunca subiu (ex.: o
           // cardápio da semana atual, fornecedores/ofertas de uma cotação
           // aplicada offline). Só preenche lacunas — nunca sobrescreve a nuvem.
+          // Reconfere ponto-a-ponto antes de empurrar (2ª camada de segurança:
+          // mesmo que `chavesNuvem` tenha vindo incompleta por algum motivo,
+          // uma checagem direta da chave evita apagar dado real na nuvem).
           for (let i = 0; i < localStorage.length; i++) {
             const kFull = localStorage.key(i);
             if (!kFull || !kFull.startsWith(PREFIXO)) continue;
@@ -174,7 +177,12 @@ export function BootNuvem() {
             if (k.startsWith('__') || setNuvem.has(k)) continue;
             const raw = localStorage.getItem(kFull);
             if (raw == null) continue;
-            try { recentes.set(k, Date.now()); subir(k, JSON.parse(raw)); } catch { /* não-JSON */ }
+            try {
+              const aindaAusente = (await armazenamentoSupabase.ler<unknown>(k, null)) === null;
+              if (!aindaAusente) continue; // não é lacuna de verdade — não empurra
+              recentes.set(k, Date.now());
+              subir(k, JSON.parse(raw));
+            } catch { /* não-JSON */ }
           }
           definirStatusNuvem('online');
           flush(); // reenvia o que ficou pendente de sessões offline anteriores
