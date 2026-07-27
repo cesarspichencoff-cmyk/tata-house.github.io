@@ -26,6 +26,38 @@ export function lerStatusNuvem() {
   return estado;
 }
 
+/* =====================================================================
+   "Boot concluído": sinaliza que a primeira reconciliação com a nuvem
+   desta sessão já terminou (com sucesso, erro, ou porque o Supabase está
+   desligado). Sem isso, uma tela que lê um documento vazio do localStorage
+   antes da nuvem responder mostra "vazio" como se fosse definitivo — e um
+   cardápio real que ainda não chegou parece ter sumido.
+   ===================================================================== */
+let bootResolvido = false;
+let resolverBoot: (() => void) | null = null;
+const promessaBoot = new Promise<void>((resolve) => {
+  resolverBoot = resolve;
+});
+
+export function marcarBootNuvemConcluido() {
+  if (bootResolvido) return;
+  bootResolvido = true;
+  resolverBoot?.();
+}
+
+export function bootNuvemJaConcluido(): boolean {
+  return bootResolvido;
+}
+
+/** Resolve quando o boot concluir, ou após `timeoutMs` (rede lenta/travada). */
+export function aguardarBootNuvem(timeoutMs = 6000): Promise<void> {
+  if (bootResolvido) return Promise.resolve();
+  return Promise.race([
+    promessaBoot,
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
 /** Observa o status da nuvem para renderizar o indicador. */
 export function useStatusNuvem() {
   const [, forcar] = useState(0);

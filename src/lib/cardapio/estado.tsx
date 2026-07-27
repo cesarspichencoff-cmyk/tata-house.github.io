@@ -6,6 +6,7 @@
    ===================================================================== */
 
 import { useCallback, useEffect, useState } from 'react';
+import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
 import historicoPlanilhaJson from './historico-planilha.json';
@@ -287,9 +288,33 @@ export function useSemana(semanaId: string) {
   }, [semanaId]);
 
   useEffect(() => {
+    let cancelado = false;
     recarregar();
-    setPronto(true);
-  }, [recarregar]);
+
+    // Se este aparelho já tem QUALQUER coisa gravada localmente para esta
+    // semana, mostra na hora — não há por que esperar a nuvem. Mas se não
+    // tem nada (aparelho novo, sessão limpa, semana nunca aberta aqui), um
+    // documento vazio pode só significar "a nuvem ainda não respondeu", não
+    // "não existe cardápio". Espera a primeira reconciliação da nuvem antes
+    // de mostrar isso como definitivo — senão um cardápio real "some" por
+    // alguns instantes toda vez que alguém abre o app num aparelho/sessão novos.
+    const jaTemAlgoLocal =
+      typeof window !== 'undefined' && localStorage.getItem(PREFIXO + 'semana.' + semanaId) != null;
+
+    if (!supabaseHabilitado() || jaTemAlgoLocal) {
+      setPronto(true);
+    } else {
+      aguardarBootNuvem().then(() => {
+        if (cancelado) return;
+        recarregar();
+        setPronto(true);
+      });
+    }
+
+    return () => {
+      cancelado = true;
+    };
+  }, [recarregar, semanaId]);
 
   useReleituraExterna('semana.' + semanaId, recarregar);
 

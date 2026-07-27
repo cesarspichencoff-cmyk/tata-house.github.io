@@ -18,6 +18,7 @@ import {
   getSupabase,
   ESPACO_DADOS,
   definirStatusNuvem,
+  marcarBootNuvemConcluido,
 } from '@/lib/cardapio/supabase';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
@@ -37,6 +38,7 @@ export function BootNuvem() {
 
     if (!supabaseHabilitado()) {
       definirStatusNuvem('desligado');
+      marcarBootNuvemConcluido(); // sem nuvem, o localStorage já é a versão final
       return;
     }
     definirStatusNuvem('conectando');
@@ -189,8 +191,14 @@ export function BootNuvem() {
         } catch {
           /* offline/erro: segue com os dados locais */
           definirStatusNuvem('erro');
+        } finally {
+          marcarBootNuvemConcluido();
         }
       })();
+    } else {
+      // Já rodou nesta sessão (outra navegação/aba) — o localStorage já reflete
+      // aquela reconciliação, então não há por que uma tela nova esperar de novo.
+      marcarBootNuvemConcluido();
     }
 
     // 3) AO VIVO: escuta mudanças de outros aparelhos e aplica na hora.
