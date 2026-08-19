@@ -10,6 +10,7 @@
 
 import { ESPACO_DADOS, PREFIXO_LOCAL, supabaseHabilitado } from './config';
 import { getSupabase } from './client';
+import { definirArmazenamentoLocalCheio } from '../aviso-armazenamento';
 
 export interface Armazenamento {
   ler<T>(chave: string, padrao: T): Promise<T>;
@@ -35,8 +36,10 @@ export const armazenamentoLocal: Armazenamento = {
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem(PREFIXO_LOCAL + chave, JSON.stringify(valor));
+      definirArmazenamentoLocalCheio(false);
     } catch {
-      /* armazenamento indisponível */
+      /* armazenamento indisponível (cheio) — aviso global cobre isso */
+      definirArmazenamentoLocalCheio(true);
     }
   },
   async remover(chave: string): Promise<void> {

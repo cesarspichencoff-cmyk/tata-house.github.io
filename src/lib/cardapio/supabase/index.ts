@@ -15,6 +15,7 @@ export {
 export { enviarTudo, baixarTudo, useSincronizacao, type EstadoSync } from './sync';
 export {
   definirStatusNuvem,
+  definirPendentesNuvem,
   lerStatusNuvem,
   useStatusNuvem,
   marcarBootNuvemConcluido,

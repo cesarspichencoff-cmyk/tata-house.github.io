@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
+import { definirArmazenamentoLocalCheio } from './aviso-armazenamento';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
 import historicoPlanilhaJson from './historico-planilha.json';
@@ -85,8 +86,12 @@ function lerLocal<T>(chave: string, padrao: T): T {
 function gravarLocal(chave: string, valor: unknown) {
   try {
     localStorage.setItem(PREFIXO + chave, JSON.stringify(valor));
+    definirArmazenamentoLocalCheio(false);
   } catch {
-    /* armazenamento cheio/indisponível: protótipo segue em memória */
+    // Armazenamento cheio/indisponível: a mudança fica só em memória (React
+    // state) e some no próximo reload. Isso não pode passar em silêncio —
+    // é o cenário "encheu o celular da pessoa" — por isso o aviso global.
+    definirArmazenamentoLocalCheio(true);
   }
 }
 

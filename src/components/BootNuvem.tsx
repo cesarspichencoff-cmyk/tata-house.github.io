@@ -18,6 +18,7 @@ import {
   getSupabase,
   ESPACO_DADOS,
   definirStatusNuvem,
+  definirPendentesNuvem,
   marcarBootNuvemConcluido,
 } from '@/lib/cardapio/supabase';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
@@ -62,6 +63,7 @@ export function BootNuvem() {
       const arr = lerPendentes().filter((x) => x !== k);
       if (pendente) arr.push(k);
       try { orig(PREFIXO + PENDENTES, JSON.stringify(arr)); } catch { /* cheio */ }
+      definirPendentesNuvem(arr.length);
     };
 
     // Sobe um valor à nuvem, atualizando status e a fila offline.
@@ -72,6 +74,10 @@ export function BootNuvem() {
         .then(() => { marcarPendente(k, false); definirStatusNuvem('online'); })
         .catch(() => { marcarPendente(k, true); definirStatusNuvem('erro'); });
     };
+
+    // Restos de uma sessão anterior (aba fechada offline, por exemplo) já
+    // contam no indicador antes mesmo da primeira tentativa de reenvio.
+    definirPendentesNuvem(lerPendentes().length);
 
     // Reenvia tudo que ficou pendente (chamado ao reconectar / voltar à aba).
     const flush = () => {

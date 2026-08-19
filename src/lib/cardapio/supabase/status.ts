@@ -11,14 +11,32 @@ import { useEffect, useState } from 'react';
 
 export type StatusNuvem = 'desligado' | 'conectando' | 'online' | 'sincronizando' | 'erro';
 
-let estado: { status: StatusNuvem; ultima: number | null } = { status: 'desligado', ultima: null };
+interface EstadoNuvem {
+  status: StatusNuvem;
+  ultima: number | null;
+  /** Desde quando o status está em 'erro' sem interrupção (null se não). Usado
+     pelo aviso visível — um blip de 1-2s não precisa virar banner. */
+  erroDesde: number | null;
+  /** Nº de chaves gravadas localmente que ainda não confirmaram na nuvem. */
+  pendentes: number;
+}
+
+let estado: EstadoNuvem = { status: 'desligado', ultima: null, erroDesde: null, pendentes: 0 };
 const ouvintes = new Set<() => void>();
 
 /** Reporta um novo status (chamado pelo BootNuvem). `ultima` marca o último
    instante em que ficou efetivamente sincronizado ('online'). */
 export function definirStatusNuvem(status: StatusNuvem) {
   const ultima = status === 'online' ? Date.now() : estado.ultima;
-  estado = { status, ultima };
+  const erroDesde = status === 'erro' ? (estado.erroDesde ?? Date.now()) : null;
+  estado = { ...estado, status, ultima, erroDesde };
+  ouvintes.forEach((f) => f());
+}
+
+/** Reporta quantas chaves locais ainda não confirmaram gravação na nuvem
+   (chamado pelo BootNuvem sempre que a fila de pendentes muda). */
+export function definirPendentesNuvem(pendentes: number) {
+  estado = { ...estado, pendentes };
   ouvintes.forEach((f) => f());
 }
 
