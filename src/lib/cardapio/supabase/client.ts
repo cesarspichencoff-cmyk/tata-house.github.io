@@ -22,6 +22,10 @@ export interface ConsultaSupabase extends PromiseLike<{ data: unknown; error: un
   upsert(linhas: unknown, opc?: unknown): ConsultaSupabase;
   delete(): ConsultaSupabase;
   eq(col: string, val: unknown): ConsultaSupabase;
+  /** Faz a query rejeitar (em vez de resolver com `{ error }`) quando o
+     Postgres/RLS recusa — sem isso um bloqueio de permissão passa como
+     "sucesso"/"vazio" para quem só olha `data`. */
+  throwOnError(): ConsultaSupabase;
 }
 
 export interface ClienteSupabase {
