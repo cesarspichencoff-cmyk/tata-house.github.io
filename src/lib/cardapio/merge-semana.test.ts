@@ -112,4 +112,17 @@ describe('mesclarSemana — merge 3-vias', () => {
     expect(m.status[0].arroz.recebidoOk).toBe(true);
     expect(m.status[1].feijao.recebidoOk).toBe(true);
   });
+
+  it('sem base: conflito no mesmo campo mantém o LOCAL, não apaga a edição recém-feita', () => {
+    // Ex.: aparelho novo (ou dados locais limpos) edita a semana antes de ter
+    // uma base gravada; a nuvem já tem outro valor (antigo/de outro aparelho)
+    // para o mesmo campo. Sem base não dá pra saber quem é mais recente — o
+    // que acabou de ser digitado neste aparelho não pode sumir silenciosamente.
+    const local = semana();
+    local.dias[0].principal = 'Frango à parmegiana';
+    const remote = semana();
+    remote.dias[0].principal = 'Peixe assado';
+    const m = mesclarSemana(null, local, remote);
+    expect(m.dias[0].principal).toBe('Frango à parmegiana');
+  });
 });

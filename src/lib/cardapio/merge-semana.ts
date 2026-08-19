@@ -11,8 +11,14 @@
      • ambos mudaram diferente → conflito real → vence o remote (quem
        escreveu por último), de forma determinística e convergente.
 
-   Sem base (primeira sincronização): cai para união de mapas (lossless
-   para edições em chaves distintas) + last-write-wins nos escalares.
+   Sem base (primeira sincronização deste aparelho para esta semana): cai
+   para união de mapas (lossless para edições em chaves distintas) e, nos
+   escalares, fica com o LOCAL — sem base não dá pra saber quem escreveu
+   por último, e a nuvem pode estar com um valor antigo/parcial; preferir
+   o remote aqui apagaria silenciosamente a edição que o aparelho acabou
+   de fazer (era o que acontecia antes: um segundo aparelho, ou este
+   mesmo após limpar dados, "puxava" a nuvem e sumia com o que tinha
+   acabado de ser digitado).
 
    Função PURA e testada (merge-semana.test.ts). É o único ponto onde a
    reconciliação da nuvem decide o documento da semana.
@@ -34,6 +40,7 @@ function folha<T>(base: T | undefined, local: T, remote: T): T {
   if (ig(local, remote)) return remote;
   if (base !== undefined && ig(local, base)) return remote; // só remote mudou
   if (base !== undefined && ig(remote, base)) return local; // só local mudou
+  if (base === undefined) return local; // sem base: nunca descarta a edição deste aparelho
   return remote; // conflito real → último a escrever (remote) vence
 }
 
