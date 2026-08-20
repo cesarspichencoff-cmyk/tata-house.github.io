@@ -85,3 +85,23 @@ describe('cotação — lê as muitas formas de colagem (celular e desktop)', ()
     expect(linhas.every((l) => l.marca === 'Mar Fish')).toBe(true);
   });
 });
+
+describe('unidade da cotação não pode inflar o custo em silêncio', () => {
+  it('caixa cotada para item medido em quilo é bloqueada, não aplicada', () => {
+    // Cenário real: fornecedor manda "ABACAXI CX 240,00". O item é medido em
+    // KG. Antes, o app aplicava R$ 240,00/kg e o custo da semana disparava.
+    const linhas = parsearCotacao('ABACAXI CX 240,00');
+    const abacaxi = linhas.find((l) => (l.item ?? l.nome).toLowerCase().includes('abacaxi'));
+    expect(abacaxi).toBeDefined();
+    expect(abacaxi!.bloqueado).toBe(true);
+    expect(abacaxi!.alerta ?? '').toMatch(/embalagem|não converte/i);
+  });
+
+  it('cotação na unidade padrão continua passando normalmente', () => {
+    const linhas = parsearCotacao('ABACAXI KG 7,40');
+    const abacaxi = linhas.find((l) => (l.item ?? l.nome).toLowerCase().includes('abacaxi'));
+    expect(abacaxi).toBeDefined();
+    expect(abacaxi!.bloqueado).toBeFalsy();
+    expect(abacaxi!.preco).toBeCloseTo(7.4, 2);
+  });
+});

@@ -221,7 +221,7 @@ export function Assistente({
           {/* Conteúdo Chef IA — recomendações da semana, centralizadas aqui */}
           {aba === 'chefia' && (
             <div className="flex-1 overflow-y-auto p-4">
-              <ChefIA estado={contexto.estado} precos={contexto.precos} expandido />
+              <ChefIA estado={contexto.estado} precos={contexto.precos} semanaId={contexto.semanaId} expandido />
             </div>
           )}
 

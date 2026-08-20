@@ -137,14 +137,16 @@ export function AbaCotacao({
   const fornDigitado = fornecedorNome.trim().replace(/^fornecedor\s*[:\-–]?\s*/i, '').trim();
 
   const aplicar = () => {
-    selecionados.forEach((c) => {
+    // Item com unidade incompatível (caixa cotada para item medido em kg, por
+    // exemplo) NÃO entra: aplicar aqui inflava o custo em silêncio.
+    selecionados.filter((c) => !c.bloqueado).forEach((c) => {
       const norm = normalizar(c.item);
       const forn = fornDigitado || c.marca;
       definirPreco(norm, c.preco, c.item);
       definirFornecedor?.(norm, forn);
       if (forn) registrarOferta?.(norm, forn, c.preco);
     });
-    setAplicado(selecionados.length);
+    setAplicado(selecionados.filter((c) => !c.bloqueado).length);
   };
 
   const cadastrar = (idx: number, s: LinhaCotacao) => {

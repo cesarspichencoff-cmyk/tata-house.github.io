@@ -27,6 +27,8 @@ import {
   lerDesperdicio,
 } from '@/lib/cardapio/estado';
 import { useGastos } from '@/lib/cardapio/gastos';
+import { analisarCardapio } from '@/lib/cardapio/copiloto';
+import type { EstadoSemana } from '@/lib/cardapio/tipos';
 
 const ROTULO: Record<CategoriaAchado, string> = {
   preco: 'Preço',
@@ -49,7 +51,20 @@ const BORDA: Record<Achado['prioridade'], string> = {
   baixa: 'border-l-carvao-300 dark:border-l-carvao-600',
 };
 
-export function EstudoOperacao({ custoRefeicao }: { custoRefeicao?: number | null }) {
+export function EstudoOperacao({
+  custoRefeicao,
+  estado,
+  semanaId,
+  precos,
+  estimativas,
+}: {
+  custoRefeicao?: number | null;
+  /** Semana aberta — permite falar já no primeiro dia, sem esperar registros. */
+  estado?: EstadoSemana;
+  semanaId?: string;
+  precos?: Record<string, number>;
+  estimativas?: Record<string, number>;
+}) {
   const { aceitacao } = useAceitacao();
   const historicoPrecos = useHistoricoPrecos();
   const { lancamentos } = useGastos();
@@ -66,7 +81,30 @@ export function EstudoOperacao({ custoRefeicao }: { custoRefeicao?: number | nul
     };
   }, [aceitacao, historicoPrecos, lancamentos, custoRefeicao]);
 
-  const achados = useMemo(() => estudarOperacao(entrada), [entrada]);
+  // Dois motores somados, de propósito:
+  //  • copiloto  → só precisa de cardápio + preço, fala desde o primeiro dia;
+  //  • estudo    → precisa de sobra/voto/nota, fica mais rico com o tempo.
+  // Rodando com os dados reais da casa (11 semanas, nenhum registro manual),
+  // o estudo sozinho produzia UM achado — por isso ninguém sentia diferença.
+  const doCopiloto = useMemo(() => {
+    if (!estado || !semanaId || !precos) return [];
+    const anteriores = semanasComConteudo()
+      .filter((id) => id !== semanaId)
+      .map((id) => ({ semanaId: id, estado: lerSemana(id) }));
+    return analisarCardapio({
+      atual: { semanaId, estado },
+      anteriores,
+      precos,
+      estimativas: estimativas ?? {},
+    });
+  }, [estado, semanaId, precos, estimativas]);
+
+  const achados = useMemo(() => {
+    const daOperacao = estudarOperacao(entrada);
+    const vistos = new Set(daOperacao.map((a) => a.id));
+    return [...daOperacao, ...doCopiloto.filter((a) => !vistos.has(a.id))];
+  }, [entrada, doCopiloto]);
+
   const cob = useMemo(() => cobertura(entrada), [entrada]);
 
   const economiaTotal = achados.reduce((s, a) => s + (a.impactoSemanal ?? 0), 0);

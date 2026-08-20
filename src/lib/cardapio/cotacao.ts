@@ -11,6 +11,7 @@
    ===================================================================== */
 
 import { DADOS, normalizar } from './motor';
+import { converterPreco } from './unidades';
 import { resolverPreco } from './precos';
 import { PRECOS_COMPRAS, UNIDADES_COMPRAS } from './precos-compras';
 import { iaEdgeAtivo, chamarEdge } from './ia-cliente';
@@ -28,6 +29,8 @@ export interface LinhaCotacao {
   deltaHistorico?: number | null; // fração: +0.3 = 30% acima
   confianca?: Confianca;
   alerta?: string | null;
+  /** Unidade incompatível com o padrão: preço NÃO pode ser aplicado. */
+  bloqueado?: boolean;
   origemHistorico?: string | null;
 }
 
@@ -41,6 +44,8 @@ export interface ItemCotado {
   deltaHistorico?: number | null;
   confianca?: Confianca;
   alerta?: string | null;
+  /** Unidade incompatível com o padrão: preço NÃO pode ser aplicado. */
+  bloqueado?: boolean;
   origemHistorico?: string | null;
 }
 
@@ -293,17 +298,39 @@ function validarLinha(l: LinhaCotacao): LinhaCotacao {
     if (delta < -0.45) alerta += ' — verificar unidade';
   }
 
-  // Valida unidade: se a cotação declarou uma unidade diferente do padrão, alerta
+  // Unidade: antes daqui, uma cotação em unidade diferente do padrão gerava
+  // só um aviso e o preço era aplicado como se estivesse na unidade certa —
+  // caixa cotada virava preço por quilo e inflava o custo em silêncio.
   const keyHist = normItem ?? normNome;
   const unidEsperada = (UNIDADES_COMPRAS[keyHist] ?? '').toLowerCase();
+  let precoFinal = l.preco;
+  let bloqueado = false;
+
   if (l.unid && unidEsperada && l.unid !== unidEsperada) {
-    const avisoUnid = `unidade "${l.unid}" ≠ padrão "${unidEsperada}" — confirmar`;
-    alerta = alerta ? `${alerta} · ${avisoUnid}` : avisoUnid;
-    if (confianca === 'alta') confianca = 'media';
+    const conv = converterPreco(l.preco, l.unid, unidEsperada);
+    if (conv.status === 'convertido') {
+      precoFinal = conv.valor;
+      const nota = `convertido de ${l.unid.toUpperCase()} para ${unidEsperada.toUpperCase()}`;
+      alerta = alerta ? `${alerta} · ${nota}` : nota;
+    } else if (conv.status === 'incompativel') {
+      bloqueado = true;
+      const nota = conv.motivo ?? `unidade "${l.unid}" ≠ padrão "${unidEsperada}"`;
+      alerta = alerta ? `${alerta} · ${nota}` : nota;
+      confianca = 'baixa';
+    }
   }
 
   const origemHistorico = hist.tipo === 'historico' ? 'planilha Mai/Jun 2026' : 'estimado';
-  return { ...l, precoHistorico: precoHist, deltaHistorico: delta, confianca, alerta, origemHistorico };
+  return {
+    ...l,
+    preco: precoFinal,
+    precoHistorico: precoHist,
+    deltaHistorico: delta,
+    confianca,
+    alerta,
+    bloqueado,
+    origemHistorico,
+  };
 }
 
 /** Top 40 itens do histórico formatados para incluir no prompt do Groq. */
@@ -611,6 +638,7 @@ export function agruparCotacao(
         deltaHistorico: l.deltaHistorico,
         confianca: l.confianca,
         alerta: l.alerta,
+        bloqueado: l.bloqueado,
         origemHistorico: l.origemHistorico,
       });
     } else {
@@ -622,6 +650,7 @@ export function agruparCotacao(
         atual.deltaHistorico = l.deltaHistorico;
         atual.confianca = l.confianca;
         atual.alerta = l.alerta;
+        atual.bloqueado = l.bloqueado;
         atual.origemHistorico = l.origemHistorico;
       }
     }

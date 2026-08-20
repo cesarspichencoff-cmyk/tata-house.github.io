@@ -56,10 +56,12 @@ export function ChefIA({
   precos,
   expandido = false,
   custoRefeicao,
+  semanaId,
 }: {
   estado: EstadoSemana;
   precos: Record<string, number>;
   expandido?: boolean;
+  semanaId?: string;
   /** Custo por refeição da semana aberta — dá valor em R$ aos achados. */
   custoRefeicao?: number | null;
 }) {
@@ -249,7 +251,15 @@ export function ChefIA({
   // O estudo da operação é o miolo do Chef IA: olha as semanas passadas,
   // as sobras, os votos e as notas. A lista de "dicas" abaixo dele é só a
   // conferência da semana aberta — útil, mas não é inteligência.
-  const estudo = expandido ? <EstudoOperacao custoRefeicao={custoRefeicao} /> : null;
+  const estudo = expandido ? (
+    <EstudoOperacao
+      custoRefeicao={custoRefeicao}
+      estado={estado}
+      semanaId={semanaId}
+      precos={precos}
+      estimativas={estimativas}
+    />
+  ) : null;
 
   if (dicas.length === 0) {
     return expandido ? (

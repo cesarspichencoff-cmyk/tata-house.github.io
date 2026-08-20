@@ -48,6 +48,7 @@ const AbaCustoPrato = dynamic(() => import('@/components/cardapio/AbaCustoPrato'
 const AbaFornecedorIntel = dynamic(() => import('@/components/cardapio/AbaFornecedorIntel').then((m) => ({ default: m.AbaFornecedorIntel })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const AbaPedido = dynamic(() => import('@/components/cardapio/AbaPedido').then((m) => ({ default: m.AbaPedido })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const CardapioOrientadoDados = dynamic(() => import('@/components/cardapio/CardapioOrientadoDados').then((m) => ({ default: m.CardapioOrientadoDados })), { ssr: false, loading: () => <Carregando h="h-64" /> });
+const CopilotoSemana = dynamic(() => import('@/components/cardapio/CopilotoSemana').then((m) => ({ default: m.CopilotoSemana })), { ssr: false, loading: () => null });
 const AbaGastos = dynamic(() => import('@/components/cardapio/AbaGastos').then((m) => ({ default: m.AbaGastos })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 import {
   deslocarSemana,
@@ -840,6 +841,17 @@ export default function PaginaCardapios() {
                   onOpenIA={() => setIaAberta(true)}
                   nomeUsuario={perfil?.rotulo}
                 />
+                {/* Copiloto — o que fazer nesta semana, com número. Fica no
+                    Início de propósito: escondido numa aba de painel flutuante
+                    ninguém via, e o app parecia não ter mudado. */}
+                <CopilotoSemana
+                  estado={estado}
+                  semanaId={semanaId}
+                  precos={precos}
+                  estimativas={estimativas}
+                  onAbrirTudo={() => setIaAberta(true)}
+                />
+
                 <AbaAgora
                   estado={estado}
                   precos={precos}
