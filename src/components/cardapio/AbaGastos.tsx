@@ -1,52 +1,83 @@
 'use client';
 
+/* =====================================================================
+   Gastos — o quanto a casa está gastando, de verdade.
+
+   Antes esta tela lia um arquivo estático de jan–mai/2026: entrava nota
+   nova e o número não mexia. Agora ela soma duas fontes sem duplicar:
+   a planilha histórica responde pelos meses que ela cobre, e as notas
+   lidas no app respondem por tudo que veio depois.
+   ===================================================================== */
+
 import { Cartao, Pilula } from '@/components/ui';
 import { formatarReais } from '@/lib/cardapio/motor';
-import gastosJson from '@/lib/cardapio/gastos-mensais.json';
+import {
+  useGastos,
+  serieMensal,
+  topItens as calcularTopItens,
+  mesCorrente,
+  ULTIMO_MES_PLANILHA,
+} from '@/lib/cardapio/gastos';
 
-const MESES_LABEL: Record<string, string> = {
-  '2026-01': 'Jan/26', '2026-02': 'Fev/26', '2026-03': 'Mar/26',
-  '2026-04': 'Abr/26', '2026-05': 'Mai/26',
-};
+const MES_NOME = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-const MESES_CURTO: Record<string, string> = {
-  '2026-01': 'Jan', '2026-02': 'Fev', '2026-03': 'Mar',
-  '2026-04': 'Abr', '2026-05': 'Mai',
-};
+function rotuloMes(mes: string, curto = false): string {
+  const [ano, m] = mes.split('-');
+  const nome = MES_NOME[Number(m) - 1] ?? mes;
+  return curto ? nome : `${nome}/${ano.slice(2)}`;
+}
 
-const dados = gastosJson as {
-  meses: { total: number; entradas: number; mes: string }[];
-  top: { n: string; t: number }[];
-};
-
-// Remove 'total' entry from top list (it's the grand total line from spreadsheet)
-const topItens = dados.top.filter((x) => x.n !== 'total');
-const maxItem = topItens.length > 0 ? topItens[0].t : 1;
-const maxMes = Math.max(...dados.meses.map((m) => m.total));
-const totalGeral = dados.meses.reduce((s, m) => s + m.total, 0);
-const mediasMes = totalGeral / dados.meses.length;
-
-const variacaoAbr = dados.meses[3] && dados.meses[2]
-  ? ((dados.meses[3].total - dados.meses[2].total) / dados.meses[2].total) * 100
-  : null;
-const variacaoMai = dados.meses[4] && dados.meses[3]
-  ? ((dados.meses[4].total - dados.meses[3].total) / dados.meses[3].total) * 100
-  : null;
-
-/**
- * Análise de gastos reais jan–mai/2026 extraída da planilha de compras.
- * Mostra tendência mensal, top itens por custo e média geral.
- */
 export function AbaGastos() {
+  const { lancamentos } = useGastos();
+
+  const serie = serieMensal(lancamentos);
+  const top = calcularTopItens(lancamentos);
+  const maxItem = top[0]?.t ?? 1;
+  const maxMes = Math.max(...serie.map((m) => m.total), 1);
+  const totalGeral = serie.reduce((s, m) => s + m.total, 0);
+  const media = totalGeral / Math.max(1, serie.length);
+
+  const mesAtual = mesCorrente();
+  const doMesAtual = serie.find((m) => m.mes === mesAtual);
+  const gastoMesAtual = doMesAtual?.total ?? 0;
+  const vsMedia = media > 0 ? ((gastoMesAtual - media) / media) * 100 : 0;
+
+  const mesesVivos = serie.filter((m) => m.fonte === 'app').length;
+  const notasLidas = lancamentos.length;
+
   return (
     <div className="space-y-4">
+      {/* Mês corrente em destaque — a pergunta operacional é "quanto já gastei?" */}
+      <Cartao className="space-y-1">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-texto-suave">
+              Gasto de {rotuloMes(mesAtual)}
+            </p>
+            <p className="font-display text-3xl font-bold leading-tight tabular-nums">
+              {formatarReais(gastoMesAtual)}
+            </p>
+          </div>
+          {gastoMesAtual > 0 && (
+            <Pilula tom={vsMedia > 10 ? 'vermelho' : vsMedia < -10 ? 'verde' : 'ouro'}>
+              {vsMedia >= 0 ? '▲' : '▼'} {Math.abs(Math.round(vsMedia))}% vs média
+            </Pilula>
+          )}
+        </div>
+        <p className="text-[11px] text-texto-suave">
+          {notasLidas > 0
+            ? `${notasLidas} nota(s) lida(s) no app · média histórica ${formatarReais(media)}/mês`
+            : 'Nenhuma nota lida ainda neste mês — leia uma NF na aba Notas para o gasto real aparecer aqui.'}
+        </p>
+      </Cartao>
+
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { r: 'Total jan–mai/26', v: formatarReais(totalGeral), sub: '5 meses' },
-          { r: 'Média mensal', v: formatarReais(mediasMes), sub: 'jan–mai/26' },
-          { r: 'Maior mês', v: formatarReais(maxMes), sub: 'Abril/26' },
-          { r: 'Entradas NF', v: String(dados.meses.reduce((s, m) => s + m.entradas, 0)), sub: 'total de linhas' },
+          { r: 'Total acumulado', v: formatarReais(totalGeral), sub: `${serie.length} meses` },
+          { r: 'Média mensal', v: formatarReais(media), sub: 'todo o período' },
+          { r: 'Maior mês', v: formatarReais(maxMes), sub: rotuloMes(serie.find((m) => m.total === maxMes)?.mes ?? '') },
+          { r: 'Meses ao vivo', v: String(mesesVivos), sub: mesesVivos > 0 ? 'notas do app' : 'só planilha' },
         ].map((k) => (
           <Cartao key={k.r} className="text-center">
             <p className="text-[10px] font-bold uppercase tracking-wide text-texto-suave">{k.r}</p>
@@ -56,27 +87,30 @@ export function AbaGastos() {
         ))}
       </div>
 
-      {/* Gasto mensal — barra horizontal */}
+      {/* Gasto mensal */}
       <Cartao className="space-y-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-bold">Gasto mensal</p>
-          <Pilula tom="ouro">jan–mai/2026</Pilula>
+          <Pilula tom="ouro">{rotuloMes(serie[0]?.mes ?? '')} – {rotuloMes(serie[serie.length - 1]?.mes ?? '')}</Pilula>
         </div>
         <div className="space-y-2">
-          {dados.meses.map((m, idx) => {
+          {serie.map((m, idx) => {
             const pct = (m.total / maxMes) * 100;
             const isMaior = m.total === maxMes;
-            const variacao = idx > 0
-              ? ((m.total - dados.meses[idx - 1].total) / dados.meses[idx - 1].total) * 100
+            const anterior = serie[idx - 1];
+            const variacao = anterior && anterior.total > 0
+              ? ((m.total - anterior.total) / anterior.total) * 100
               : null;
             return (
               <div key={m.mes} className="flex items-center gap-2">
                 <span className="w-8 shrink-0 text-right text-[11px] font-bold text-texto-suave">
-                  {MESES_CURTO[m.mes]}
+                  {rotuloMes(m.mes, true)}
                 </span>
                 <div className="relative flex-1 overflow-hidden rounded-full bg-carvao-100 dark:bg-carvao-700/50" style={{ height: 22 }}>
                   <div
-                    className={`h-full rounded-full transition-all ${isMaior ? 'bg-ouro-400' : 'bg-brand-400 dark:bg-brand-500'}`}
+                    className={`h-full rounded-full transition-all ${
+                      isMaior ? 'bg-ouro-400' : m.fonte === 'app' ? 'bg-brand-600' : 'bg-brand-400 dark:bg-brand-500'
+                    }`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -92,62 +126,58 @@ export function AbaGastos() {
             );
           })}
         </div>
-        {(variacaoAbr !== null || variacaoMai !== null) && (
-          <p className="text-[11px] text-texto-suave">
-            {variacaoAbr !== null && variacaoAbr > 0 && (
-              <>Abril teve alta de <strong className="text-perigo">{Math.round(variacaoAbr)}%</strong> vs. Março. </>
-            )}
-            {variacaoMai !== null && variacaoMai < 0 && (
-              <>Maio recuou <strong className="text-brand-600">{Math.abs(Math.round(variacaoMai))}%</strong> em relação ao pico de Abril.</>
-            )}
-          </p>
-        )}
+        <p className="text-[11px] text-texto-suave">
+          Barra escura = mês apurado pelas notas lidas no app. Barra clara = planilha histórica
+          (até {rotuloMes(ULTIMO_MES_PLANILHA)}).
+        </p>
       </Cartao>
 
       {/* Top itens por gasto total */}
       <Cartao className="space-y-3">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-bold">Itens que mais pesam no orçamento</p>
-          <Pilula tom="vermelho">jan–mai/2026</Pilula>
-        </div>
-        <p className="text-xs text-texto-suave">
-          Base: planilha de compras jan–mai/2026. Gastos acumulados reais (NF).
-        </p>
+        <p className="text-sm font-bold">Itens que mais pesam no orçamento</p>
         <div className="space-y-2">
-          {topItens.map((item, idx) => {
+          {top.map((item, idx) => {
             const pct = (item.t / maxItem) * 100;
-            const pctGasto = (item.t / totalGeral) * 100;
+            const pctGasto = totalGeral > 0 ? (item.t / totalGeral) * 100 : 0;
             return (
               <div key={item.n} className="flex items-center gap-2">
                 <span className="w-4 shrink-0 text-right text-[10px] text-texto-suave">{idx + 1}</span>
                 <span className="w-32 shrink-0 truncate text-xs font-semibold capitalize">{item.n}</span>
                 <div className="relative flex-1 overflow-hidden rounded-full bg-carvao-100 dark:bg-carvao-700/50" style={{ height: 16 }}>
-                  <div
-                    className="h-full rounded-full bg-brand-300 dark:bg-brand-600"
-                    style={{ width: `${pct}%` }}
-                  />
+                  <div className="h-full rounded-full bg-brand-300 dark:bg-brand-600" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="w-20 shrink-0 text-right text-[11px] tabular-nums">
-                  {formatarReais(item.t)}
-                </span>
-                <span className="w-8 shrink-0 text-right text-[10px] text-texto-suave">
-                  {pctGasto.toFixed(0)}%
-                </span>
+                <span className="w-20 shrink-0 text-right text-[11px] tabular-nums">{formatarReais(item.t)}</span>
+                <span className="w-8 shrink-0 text-right text-[10px] text-texto-suave">{pctGasto.toFixed(0)}%</span>
               </div>
             );
           })}
         </div>
-        <p className="text-[11px] text-texto-suave">
-          Açaim em cubo e filé de frango juntos representam{' '}
-          <strong>{(((topItens[0]?.t ?? 0) + (topItens[1]?.t ?? 0)) / totalGeral * 100).toFixed(0)}%</strong>{' '}
-          do gasto total do período.
-        </p>
+        {top.length >= 2 && totalGeral > 0 && (
+          <p className="text-[11px] text-texto-suave">
+            <strong className="capitalize">{top[0].n}</strong> e{' '}
+            <strong className="capitalize">{top[1].n}</strong> juntos representam{' '}
+            <strong>{(((top[0].t + top[1].t) / totalGeral) * 100).toFixed(0)}%</strong> do gasto do período.
+          </p>
+        )}
       </Cartao>
 
-      {/* Nota de origem */}
-      <p className="text-center text-[11px] text-texto-suave">
-        Dados extraídos da planilha "Alimentação de Funcionário jan–mai/2026" · {dados.meses.reduce((s, m) => s + m.entradas, 0)} linhas de NF
-      </p>
+      {/* Últimas notas lançadas */}
+      {lancamentos.length > 0 && (
+        <Cartao className="space-y-2">
+          <p className="text-sm font-bold">Últimas notas lançadas</p>
+          {lancamentos.slice(0, 8).map((l) => (
+            <div key={l.id} className="flex items-center justify-between gap-3 border-b border-carvao-100 pb-1.5 last:border-0 dark:border-carvao-700/50">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold">{l.fornecedor}</p>
+                <p className="text-[10px] text-texto-suave">
+                  {l.data.split('-').reverse().join('/')} · {l.itens.length} item(ns)
+                </p>
+              </div>
+              <span className="shrink-0 text-xs font-bold tabular-nums">{formatarReais(l.total)}</span>
+            </div>
+          ))}
+        </Cartao>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Botao, Cartao, Pilula, estiloInput, estiloRotulo } from '@/components/u
 import { Icone } from '@/components/Icones';
 import { normalizar } from '@/lib/cardapio/motor';
 import { comprimirImagem, lerNotaFiscalViaIA } from '@/lib/cardapio/nf-leitura';
+import { useGastos } from '@/lib/cardapio/gastos';
 import type { ItemNotaExtraido, ResultadoLeituraNF } from '@/lib/cardapio/nf-leitura';
 
 const CHAVE_GROQ = 'cardapio.v1.groq.key';
@@ -33,6 +34,7 @@ export function AbaNF({
   onAplicarPrecos: (itens: { norm: string; valor: number; nome: string }[]) => void;
   onRegistrarFornecedor?: (nome: string, cnpj?: string, itens?: { norm: string; nome: string }[]) => void;
 }) {
+  const { registrar: registrarGasto } = useGastos();
   const inputRef = useRef<HTMLInputElement>(null);
   const [groqKey, setGroqKey] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
@@ -94,8 +96,9 @@ export function AbaNF({
 
   const handleAplicar = () => {
     if (!resultado) return;
-    const itens = resultado.itens
-      .filter((_, i) => selecionados.has(i) && _.precoUnit > 0)
+    const escolhidos = resultado.itens.filter((_, i) => selecionados.has(i));
+    const itens = escolhidos
+      .filter((it) => it.precoUnit > 0)
       .map((it) => ({
         norm: normalizar(it.produto),
         valor: it.precoUnit,
@@ -106,6 +109,30 @@ export function AbaNF({
     if (resultado.fornecedor && onRegistrarFornecedor) {
       onRegistrarFornecedor(resultado.fornecedor, resultado.cnpj, itens);
     }
+
+    // Além dos preços, a nota vira GASTO. Antes tudo isto era descartado:
+    // fornecedor, data, total e itens já vinham da leitura, mas só o preço
+    // era aproveitado — por isso a tela de Gastos nunca mexia.
+    const totalItens = escolhidos.reduce((s, it) => s + (it.precoTotal || 0), 0);
+    const total = resultado.totalNF && resultado.totalNF > 0 ? resultado.totalNF : totalItens;
+    if (total > 0) {
+      registrarGasto({
+        data: resultado.data || new Date().toISOString().slice(0, 10),
+        fornecedor: resultado.fornecedor || 'Fornecedor não identificado',
+        cnpj: resultado.cnpj,
+        total,
+        origem: 'nf',
+        itens: escolhidos.map((it) => ({
+          produto: it.produto,
+          norm: normalizar(it.produto),
+          qtd: it.qtd,
+          unid: it.unid,
+          precoUnit: it.precoUnit,
+          precoTotal: it.precoTotal,
+        })),
+      });
+    }
+
     setAplicado(true);
     setTimeout(() => setAplicado(false), 3000);
   };

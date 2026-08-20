@@ -25,6 +25,7 @@ import { resolverPreco } from '@/lib/cardapio/precos';
 import { receitaDoPrato, RECEITAS_POR_CATEGORIA } from '@/lib/cardapio/receitas';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
 import { useAceitacao, useChefFeedback, semanasComConteudo, lerSemana } from '@/lib/cardapio/estado';
+import { EstudoOperacao } from './EstudoOperacao';
 import type { DiaCardapio, EstadoSemana } from '@/lib/cardapio/tipos';
 
 /* Pratos que nunca devem ser sugeridos como prato principal de almoço */
@@ -54,10 +55,13 @@ export function ChefIA({
   estado,
   precos,
   expandido = false,
+  custoRefeicao,
 }: {
   estado: EstadoSemana;
   precos: Record<string, number>;
   expandido?: boolean;
+  /** Custo por refeição da semana aberta — dá valor em R$ aos achados. */
+  custoRefeicao?: number | null;
 }) {
   const { estimativas } = useEstimativas();
   const { aceitacao } = useAceitacao();
@@ -242,8 +246,15 @@ export function ChefIA({
     roxo: 'bg-[#7c5fa0]/5 ring-[#7c5fa0]/20',
   };
 
+  // O estudo da operação é o miolo do Chef IA: olha as semanas passadas,
+  // as sobras, os votos e as notas. A lista de "dicas" abaixo dele é só a
+  // conferência da semana aberta — útil, mas não é inteligência.
+  const estudo = expandido ? <EstudoOperacao custoRefeicao={custoRefeicao} /> : null;
+
   if (dicas.length === 0) {
     return expandido ? (
+      <div className="space-y-4">
+      {estudo}
       <Cartao className="space-y-3 border-l-4 !border-l-brand-500">
         <div className="flex items-center gap-2">
           
@@ -258,10 +269,13 @@ export function ChefIA({
           <p className="text-caption text-texto-suave">{feedbacks.filter((f) => f.voto === 'ruim').length} sugestão(ões) descartada(s) pelo time.</p>
         )}
       </Cartao>
+      </div>
     ) : null;
   }
 
   return (
+    <div className="space-y-4">
+    {estudo}
     <Cartao className={`space-y-3 border-l-4 !border-l-brand-500 ${expandido ? '' : ''}`}>
       <div className="flex items-center gap-2">
         
@@ -339,5 +353,6 @@ export function ChefIA({
       )}
       <p className="text-micro text-texto-suave">Use para ensinar o Chef IA sobre o que não funciona na operação.</p>
     </Cartao>
+    </div>
   );
 }
