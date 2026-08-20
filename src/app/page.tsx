@@ -881,6 +881,7 @@ export default function PaginaCardapios() {
                     <AbaCardapio
                       estado={estado}
                       atualizar={atualizar}
+                      semanaId={semanaId}
                       podeEditar={podeEditarCardapio}
                       precos={precos}
                       definirPreco={definirPreco}

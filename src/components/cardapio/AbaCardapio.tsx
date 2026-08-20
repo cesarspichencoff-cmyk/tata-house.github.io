@@ -28,6 +28,7 @@ import { SeletorPrato } from './SeletorPrato';
 import { OperacaoDia } from './OperacaoDia';
 import { PrevisaoPresenca } from './PrevisaoPresenca';
 import { ComoFazer } from './ComoFazer';
+import { HistoricoSemana } from './HistoricoSemana';
 import { NutricaoPrato } from './NutricaoPrato';
 import { AntiMonotonia } from './AntiMonotonia';
 import { TermometroAlmoco } from './TermometroAlmoco';
@@ -125,6 +126,7 @@ function PratoIntel({
 export function AbaCardapio({
   estado,
   atualizar,
+  semanaId,
   podeEditar,
   precos,
   definirPreco,
@@ -136,6 +138,7 @@ export function AbaCardapio({
 }: {
   estado: EstadoSemana;
   atualizar: (fn: (e: EstadoSemana) => EstadoSemana) => void;
+  semanaId: string;
   podeEditar: boolean;
   precos: Record<string, number>;
   definirPreco?: (itemNorm: string, valor: number | null, nome?: string) => void;
@@ -701,6 +704,13 @@ export function AbaCardapio({
         <IndicadorNutricional dias={estado.dias} />
         <PrevisaoPresenca estado={estado} atualizar={atualizar} podeEditar={podeEditar} />
       </Disclosure>
+
+      {/* Desfazer: volta a semana a uma versão anterior deste aparelho */}
+      <HistoricoSemana
+        semanaId={semanaId}
+        podeEditar={podeEditar}
+        aoRestaurar={(anterior) => atualizar(() => anterior)}
+      />
 
       {/* Orçamento + itens sem preço */}
       <Cartao className="space-y-3">

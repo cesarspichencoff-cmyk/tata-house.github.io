@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
 import { definirArmazenamentoLocalCheio } from './aviso-armazenamento';
+import { registrarVersao } from './historico-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
 import historicoPlanilhaJson from './historico-planilha.json';
@@ -327,6 +328,9 @@ export function useSemana(semanaId: string) {
     (fn: (atual: EstadoSemana) => EstadoSemana) => {
       setEstado((atual) => {
         const novo = fn(atual);
+        // Foto do que existia ANTES desta alteração — é o que o botão
+        // "Restaurar" oferece de volta.
+        registrarVersao('semana.' + semanaId, atual, 'local');
         gravarLocal('semana.' + semanaId, novo);
         return novo;
       });

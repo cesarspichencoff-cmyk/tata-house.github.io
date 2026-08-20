@@ -20,9 +20,17 @@ import {
   definirStatusNuvem,
   definirPendentesNuvem,
   marcarBootNuvemConcluido,
+  aguardarBootNuvem,
 } from '@/lib/cardapio/supabase';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
+import { registrarVersao } from '@/lib/cardapio/historico-semana';
+import {
+  precisaReparo,
+  aplicarReparo,
+  SEMANA_REPARO,
+  MARCA_REPARO,
+} from '@/lib/cardapio/reparo-feijoada';
 import type { EstadoSemana } from '@/lib/cardapio/tipos';
 
 const PREFIXO = 'cardapio.v1.';
@@ -62,6 +70,29 @@ export function BootNuvem() {
         })
         .catch(() => {});
     }
+
+    // Reparo pontual da semana 24–30/08 (põe a feijoada de volta na quarta,
+    // desfazendo um estrago nosso). Espera a primeira reconciliação terminar
+    // — com nuvem, isso é depois do download; sem nuvem, é imediato — para
+    // corrigir o dado real em vez de ressuscitar uma cópia velha. Uma vez por
+    // aparelho, e só se a semana ainda estiver no estado errado.
+    void aguardarBootNuvem().then(() => {
+      try {
+        if (localStorage.getItem(MARCA_REPARO)) return;
+        const bruto = localStorage.getItem(PREFIXO + SEMANA_REPARO);
+        const semana = bruto ? (JSON.parse(bruto) as EstadoSemana) : null;
+        if (semana && precisaReparo(semana)) {
+          registrarVersao(SEMANA_REPARO, semana, 'local');
+          // setItem espelha na nuvem quando ela está ligada — a correção
+          // chega sozinha aos outros aparelhos.
+          localStorage.setItem(PREFIXO + SEMANA_REPARO, JSON.stringify(aplicarReparo(semana)));
+          notificarChaveExterna(SEMANA_REPARO);
+        }
+        localStorage.setItem(MARCA_REPARO, '1'); // chave "__": não vai à nuvem
+      } catch {
+        /* reparo é um extra: nunca atrapalha o resto */
+      }
+    });
 
     if (!supabaseHabilitado()) {
       definirStatusNuvem('desligado');
@@ -160,6 +191,9 @@ export function BootNuvem() {
       }
       const base = lerBase(chave);
       const merged = mesclarSemana(base, local, remote);
+      // Antes de deixar a nuvem alterar esta semana, guarda o que havia aqui.
+      // É esta foto que salva a pessoa quando uma semana "muda sozinha".
+      if (!ig(merged, local)) registrarVersao(chave, local, 'nuvem');
       gravarBase(chave, remote); // a base passa a ser o que a nuvem mandou
       const mudouLocal = !ig(merged, local);
       if (mudouLocal) {

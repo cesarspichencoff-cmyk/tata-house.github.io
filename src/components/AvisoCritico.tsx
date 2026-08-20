@@ -84,7 +84,11 @@ function Banner({ cor, children }: { cor: string; children: React.ReactNode }) {
   return (
     <div
       role="alert"
-      className={`fixed inset-x-0 top-0 z-50 ${cor} px-4 py-2 text-center text-caption font-semibold text-white shadow-md print:hidden`}
+      // Fica no fluxo normal (nem `fixed`, nem `sticky`): o cabeçalho do app
+      // já é sticky em top-0, e uma faixa presa no topo acabava cobrindo a
+      // busca e o botão "Sair". Aqui ela aparece no alto ao abrir — que é
+      // quando precisa ser vista — sem disputar espaço com os controles.
+      className={`${cor} px-4 py-2 text-center text-caption font-semibold text-white shadow-md print:hidden`}
       style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}
     >
       {children}
