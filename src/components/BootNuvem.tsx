@@ -158,15 +158,20 @@ export function BootNuvem() {
         notificarChaveExterna(chave);
         return true;
       }
-      const merged = mesclarSemana(lerBase(chave), local, remote);
+      const base = lerBase(chave);
+      const merged = mesclarSemana(base, local, remote);
       gravarBase(chave, remote); // a base passa a ser o que a nuvem mandou
       const mudouLocal = !ig(merged, local);
       if (mudouLocal) {
         orig(PREFIXO + chave, JSON.stringify(merged));
         notificarChaveExterna(chave);
       }
-      // Se o merge difere do que a nuvem tem, devolve o merge para convergir.
-      if (!ig(merged, remote)) {
+      // Se o merge difere do que a nuvem tem, devolve o merge para convergir —
+      // mas SÓ quando existe base. Sem base, o merge é um palpite sobre um
+      // documento de idade desconhecida; publicá-lo deixa esse palpite valendo
+      // para toda a equipe. Aqui o aparelho apenas se alinha à nuvem e volta a
+      // ter base, e qualquer edição real feita depois sobe normalmente.
+      if (base && !ig(merged, remote)) {
         recentes.set(chave, Date.now());
         subir(chave, merged);
       }

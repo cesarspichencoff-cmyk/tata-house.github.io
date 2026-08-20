@@ -13,12 +13,9 @@
 
    Sem base (primeira sincronização deste aparelho para esta semana): cai
    para união de mapas (lossless para edições em chaves distintas) e, nos
-   escalares, fica com o LOCAL — sem base não dá pra saber quem escreveu
-   por último, e a nuvem pode estar com um valor antigo/parcial; preferir
-   o remote aqui apagaria silenciosamente a edição que o aparelho acabou
-   de fazer (era o que acontecia antes: um segundo aparelho, ou este
-   mesmo após limpar dados, "puxava" a nuvem e sumia com o que tinha
-   acabado de ser digitado).
+   escalares, PRESERVA A NUVEM. Um aparelho sem base pode estar carregando
+   uma cópia de semanas atrás; deixá-lo vencer o merge apaga o trabalho de
+   todo mundo (ver o aviso em `folha`).
 
    Função PURA e testada (merge-semana.test.ts). É o único ponto onde a
    reconciliação da nuvem decide o documento da semana.
@@ -40,8 +37,17 @@ function folha<T>(base: T | undefined, local: T, remote: T): T {
   if (ig(local, remote)) return remote;
   if (base !== undefined && ig(local, base)) return remote; // só remote mudou
   if (base !== undefined && ig(remote, base)) return local; // só local mudou
-  if (base === undefined) return local; // sem base: nunca descarta a edição deste aparelho
-  return remote; // conflito real → último a escrever (remote) vence
+  // Conflito real → vence o REMOTE (a nuvem é a verdade compartilhada).
+  //
+  // ⚠️ NÃO troque isto por "sem base, vence o local". Já tentamos, e destruiu
+  // dado real: um aparelho parado há semanas não tem base e carrega uma cópia
+  // ANTIGA da semana. Ao voltar a sincronizar, ele vencia o merge com essa
+  // cópia velha e ainda a empurrava para a nuvem — apagando, para todo mundo,
+  // o cardápio que tinha acabado de ser montado em outro aparelho.
+  // Sem base não há como saber quem é mais recente; entre arriscar perder a
+  // digitação de um aparelho e arriscar sobrescrever a semana inteira de todos,
+  // o certo é preservar a nuvem.
+  return remote;
 }
 
 /** Merge de um mapa chave→valor, com um combinador por valor (3-way no valor
