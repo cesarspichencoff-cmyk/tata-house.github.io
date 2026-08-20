@@ -188,10 +188,29 @@ export function BootNuvem() {
       return false;
     };
 
-    // 2) Uma vez por sessão: traz a nuvem e reconcilia o estado in-place.
-    if (!sessionStorage.getItem('nuvem.boot')) {
-      sessionStorage.setItem('nuvem.boot', '1');
-      (async () => {
+    // 2) A cada carregamento da página: traz a nuvem e reconcilia in-place.
+    //
+    // ⚠️ Aqui morava o pior defeito do app. A trava era `sessionStorage`
+    // ('nuvem.boot'), gravada ANTES da busca sequer começar — e sessionStorage
+    // sobrevive a recarregamentos da aba. Consequência: bastava a pessoa
+    // atualizar a página (exatamente o que alguém faz quando a tela parece
+    // errada) para que TODA busca na nuvem fosse pulada pelo resto da vida
+    // daquela aba. Num aparelho com o armazenamento vazio — o da colega, ou
+    // o de quem acabou de limpar os dados — a tela ficava vazia para sempre,
+    // e atualizar de novo só reforçava o bloqueio. Os dados estavam na nuvem
+    // o tempo todo; o app é que se recusava a buscá-los.
+    //
+    // A trava agora vive só na memória da página: um recarregamento é um
+    // contexto novo, logo SEMPRE re-sincroniza (que é o que "atualizar"
+    // deveria significar). Ela continua evitando busca dupla quando o React
+    // remonta o componente dentro do mesmo carregamento.
+    const janela = window as unknown as { __nuvemBootIniciado?: boolean };
+    sessionStorage.removeItem('nuvem.boot'); // limpa a trava herdada de versões antigas
+
+    const puxarDaNuvem = async () => {
+      if (janela.__nuvemBootIniciado) return; // já buscando neste carregamento
+      janela.__nuvemBootIniciado = true;
+      {
         try {
           const chavesNuvem = await armazenamentoSupabase.listarChaves();
           const setNuvem = new Set(chavesNuvem);
@@ -222,17 +241,18 @@ export function BootNuvem() {
           definirStatusNuvem('online');
           flush(); // reenvia o que ficou pendente de sessões offline anteriores
         } catch {
-          /* offline/erro: segue com os dados locais */
+          // Falhou a busca: NÃO deixa o aparelho preso sem dados. Libera a
+          // trava para que a próxima tentativa (voltar à aba, reconectar)
+          // possa buscar de novo — antes, uma única falha condenava a aba.
+          janela.__nuvemBootIniciado = false;
           definirStatusNuvem('erro');
         } finally {
           marcarBootNuvemConcluido();
         }
-      })();
-    } else {
-      // Já rodou nesta sessão (outra navegação/aba) — o localStorage já reflete
-      // aquela reconciliação, então não há por que uma tela nova esperar de novo.
-      marcarBootNuvemConcluido();
-    }
+      }
+    };
+
+    void puxarDaNuvem();
 
     // 3) AO VIVO: escuta mudanças de outros aparelhos e aplica na hora.
     let canal: { unsubscribe: () => void } | null = null;
@@ -270,9 +290,17 @@ export function BootNuvem() {
       }
     })();
 
-    // 4) Reenvia a fila offline ao reconectar ou voltar para a aba.
-    const aoReconectar = () => flush();
-    const aoVoltar = () => { if (document.visibilityState === 'visible') flush(); };
+    // 4) Ao reconectar ou voltar para a aba: reenvia a fila offline E, se a
+    //    busca inicial tiver falhado, tenta baixar de novo. Sem esta segunda
+    //    parte, um aparelho que abriu o app sem internet ficava vazio até
+    //    alguém fechar e reabrir a aba — o pior momento possível para exigir
+    //    isso de quem só quer ver o cardápio do dia.
+    const sincronizar = () => {
+      flush();
+      void puxarDaNuvem(); // no-op se a busca deste carregamento já deu certo
+    };
+    const aoReconectar = () => sincronizar();
+    const aoVoltar = () => { if (document.visibilityState === 'visible') sincronizar(); };
     window.addEventListener('online', aoReconectar);
     document.addEventListener('visibilitychange', aoVoltar);
 
