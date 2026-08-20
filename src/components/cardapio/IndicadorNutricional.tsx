@@ -6,7 +6,8 @@
    ===================================================================== */
 
 import { useMemo } from 'react';
-import { infoNutricional, indiceNutricionalSemana } from '@/lib/cardapio/nutricional';
+import { indiceNutricionalSemana } from '@/lib/cardapio/nutricao-prato';
+import { nutricaoDoPratoMontado } from '@/lib/cardapio/nutricao-prato';
 import type { DiaCardapio } from '@/lib/cardapio/tipos';
 
 export function IndicadorNutricional({ dias }: { dias: DiaCardapio[] }) {
@@ -16,7 +17,10 @@ export function IndicadorNutricional({ dias }: { dias: DiaCardapio[] }) {
   );
 
   const pratosComInfo = useMemo(
-    () => dias.map((d, i) => ({ i, dia: d, info: infoNutricional(d.principal) })).filter((x) => x.info),
+    // Prato montado (proteína + arroz + feijão + guarnição + salada) — é o
+    // que a pessoa come de fato. Medir só a proteína deixava o carboidrato
+    // irreal e a gordura dominando o perfil (revisão do nutricionista).
+    () => dias.map((d, i) => ({ i, dia: d, info: nutricaoDoPratoMontado(d) })).filter((x) => x.info),
     [dias],
   );
 
@@ -33,9 +37,9 @@ export function IndicadorNutricional({ dias }: { dias: DiaCardapio[] }) {
   const infos = pratosComInfo.map((x) => x.info!);
   const media = {
     kcal: Math.round(infos.reduce((a, p) => a + p.kcal, 0) / infos.length),
-    proteinas: Math.round(infos.reduce((a, p) => a + p.proteinas, 0) / infos.length),
-    carboidratos: Math.round(infos.reduce((a, p) => a + p.carboidratos, 0) / infos.length),
-    gorduras: Math.round(infos.reduce((a, p) => a + p.gorduras, 0) / infos.length),
+    proteinas: Math.round(infos.reduce((a, p) => a + p.prot, 0) / infos.length),
+    carboidratos: Math.round(infos.reduce((a, p) => a + p.carb, 0) / infos.length),
+    gorduras: Math.round(infos.reduce((a, p) => a + p.gord, 0) / infos.length),
     sodio: Math.round(infos.reduce((a, p) => a + p.sodio, 0) / infos.length),
   };
 
@@ -75,7 +79,7 @@ export function IndicadorNutricional({ dias }: { dias: DiaCardapio[] }) {
           </div>
         ))}
       </div>
-      <p className="text-micro text-texto-suave">Média por prato principal · {pratosComInfo.length} dia(s) com dados</p>
+      <p className="text-micro text-texto-suave">Média do prato montado (~500 g) · {pratosComInfo.length} dia(s) com dados</p>
 
       {/* Alertas nutricionais */}
       {detalhes.length > 0 && (

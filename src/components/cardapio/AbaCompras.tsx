@@ -7,12 +7,12 @@ import {
   DADOS,
   DIAS_SEMANA,
   converterParaUnidadeBase,
-  custoDaLista,
   formatarQtd,
   formatarReais,
   linhasDoDia,
 } from '@/lib/cardapio/motor';
 import { resolverPreco } from '@/lib/cardapio/precos';
+import { custoDoDia } from '@/lib/cardapio/custo-semana';
 import { registrarAuditoria, useMostrarBasicos } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
 import { pode } from '@/lib/cardapio/org';
@@ -595,12 +595,14 @@ export function AbaCompras({
 
       {modo === 'detalhado' &&
         estado.dias.map((dia, di) => {
-        const linhas = linhasDoDia(estado, di, fatores);
+        const linhas = linhasDoDia(estado, di, fatores, { mostrarBasicos });
         if (!dia.principal && linhas.length === 0) return null;
-        const custo = custoDaLista(
-          linhas.map((l) => ({ item: l.item, unid: l.unid, qtd: l.qtd })),
-          precos,
-        );
+        // FONTE ÚNICA (custo-semana.ts). Antes usava custoDaLista, que só
+        // olhava o mapa de preços cru: item sem preço direto entrava como
+        // ZERO, sem estimativa nem fallback de ingrediente base — e ainda
+        // montava a lista ignorando "mostrar básicos". Resultado: número
+        // diferente do da tela do cardápio, e subestimado.
+        const custo = custoDoDia(estado, di, precos, estimativas, { fatores, mostrarBasicos });
         const compradas = linhas.filter((l) => l.status.compradoEm).length;
         const recebidas = linhas.filter((l) => l.status.recebidoOk).length;
         const divergencias = linhas.filter(
@@ -624,7 +626,7 @@ export function AbaCompras({
               </h3>
               <p className="text-xs font-semibold tabular-nums text-texto-suave">
                 {compradas}/{linhas.length} comprados · {recebidas}/{linhas.length} recebidos
-                {custo.itensComPreco > 0 && <> · ≈ {formatarReais(custo.total)}</>}
+                {custo.itensReais + custo.itensEstimados > 0 && <> · ≈ {formatarReais(custo.total)}</>}
                 {divergencias > 0 && <span className="font-extrabold text-perigo"> · {divergencias} divergências</span>}
                 {notasDoDia > 0 && (
                   <span className="font-bold text-brand-600">

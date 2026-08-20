@@ -10,7 +10,8 @@
 
 import { useState } from 'react';
 import { Icone } from '@/components/Icones';
-import { infoNutricional } from '@/lib/cardapio/nutricional';
+import { nutricaoDoPratoMontado, PORCAO_PRATO_G } from '@/lib/cardapio/nutricao-prato';
+import type { DiaCardapio } from '@/lib/cardapio/tipos';
 
 /** Rótulo do índice (mesma faixa do índice semanal). */
 function rotuloIndice(v: number): { texto: string; cor: string; bg: string } {
@@ -19,26 +20,38 @@ function rotuloIndice(v: number): { texto: string; cor: string; bg: string } {
   return { texto: 'pesado', cor: 'text-perigo', bg: 'bg-perigo' };
 }
 
-export function NutricaoPrato({ prato }: { prato: string }) {
+export function NutricaoPrato({ dia }: { dia: DiaCardapio }) {
   const [aberto, setAberto] = useState(false);
-  const info = infoNutricional(prato);
+  // Prato MONTADO (proteína + arroz + feijão + guarnição + salada) — igual
+  // ao índice da semana e ao pôster. Mostrar só a proteína aqui era o que
+  // fazia o carboidrato aparecer irreal.
+  const info = nutricaoDoPratoMontado(dia);
   if (!info) return null;
 
-  const idx = rotuloIndice(info.indiceSaudavel);
+  // Índice do prato completo, nas faixas de um almoço (~500 g).
+  const pctGordura = info.kcal > 0 ? (info.gord * 9) / info.kcal : 0;
+  let pontos = 100;
+  if (info.kcal > 850) pontos -= 14; else if (info.kcal < 450) pontos -= 8;
+  if (info.sodio > 1200) pontos -= 16; else if (info.sodio > 900) pontos -= 8;
+  if (pctGordura > 0.4) pontos -= 16; else if (pctGordura > 0.35) pontos -= 8;
+  if (info.prot >= 25) pontos += 5; else if (info.prot < 18) pontos -= 10;
+  if (info.fibra >= 8) pontos += 5;
+  const indice = Math.max(20, Math.min(100, Math.round(pontos)));
+  const idx = rotuloIndice(indice);
 
   // alertas pontuais por prato
   const alertas: string[] = [];
-  if (info.sodio > 800) alertas.push('sódio alto');
-  if (info.proteinas < 15) alertas.push('proteína baixa');
-  if (info.kcal > 550) alertas.push('calórico');
-  if (info.gorduras > 26) alertas.push('gorduroso');
+  if (info.sodio > 1200) alertas.push('sódio alto');
+  if (info.prot < 18) alertas.push('proteína baixa');
+  if (info.kcal > 850) alertas.push('calórico');
+  if (pctGordura > 0.4) alertas.push('gorduroso');
 
   const macros: [string, string][] = [
     ['Kcal', `${info.kcal}`],
-    ['Proteína', `${info.proteinas}g`],
-    ['Carbo', `${info.carboidratos}g`],
-    ['Gordura', `${info.gorduras}g`],
-    ['Fibra', `${info.fibras}g`],
+    ['Proteína', `${info.prot}g`],
+    ['Carbo', `${info.carb}g`],
+    ['Gordura', `${info.gord}g`],
+    ['Fibra', `${info.fibra}g`],
     ['Sódio', `${info.sodio}mg`],
   ];
 
@@ -52,11 +65,11 @@ export function NutricaoPrato({ prato }: { prato: string }) {
       >
         <span className="flex items-center gap-1.5 text-micro font-extrabold uppercase tracking-[0.18em] text-texto-suave">
           <Icone nome="nutricao" tam={13} className="text-brand-500" /> Nutrição do prato
-          {info.porcao !== '—' && <span className="font-bold text-texto-suave">· {info.porcao}</span>}
+          <span className="font-bold text-texto-suave">· prato ~{PORCAO_PRATO_G}g</span>
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-caption font-black ring-1 ring-carvao-100 dark:bg-carvao-800 dark:ring-carvao-700 ${idx.cor}`}>
-            {info.indiceSaudavel}% {idx.texto}
+            {indice}% {idx.texto}
           </span>
           <Icone nome="baixo" tam={14} className={`text-texto-suave transition-transform ${aberto ? 'rotate-180' : ''}`} />
         </span>
@@ -66,7 +79,7 @@ export function NutricaoPrato({ prato }: { prato: string }) {
 
       {/* Barra do índice */}
       <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-carvao-100 dark:bg-carvao-800">
-        <div className={`h-full rounded-full ${idx.bg} transition-all duration-500`} style={{ width: `${info.indiceSaudavel}%` }} />
+        <div className={`h-full rounded-full ${idx.bg} transition-all duration-500`} style={{ width: `${indice}%` }} />
       </div>
 
       {/* Macros — 3 colunas para os números caberem sem vazar */}

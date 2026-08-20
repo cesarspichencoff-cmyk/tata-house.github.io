@@ -9,7 +9,8 @@
 import { useEffect, useState } from 'react';
 import { Botao } from '@/components/ui';
 import { toast } from '@/components/Toast';
-import { lerVersoes, resumirVersao, type VersaoSemana } from '@/lib/cardapio/historico-semana';
+import { lerVersoes, registrarVersao, resumirVersao, type VersaoSemana } from '@/lib/cardapio/historico-semana';
+import { supabaseHabilitado } from '@/lib/cardapio/supabase';
 import type { EstadoSemana } from '@/lib/cardapio/tipos';
 
 function quando(iso: string): string {
@@ -24,15 +25,18 @@ function quando(iso: string): string {
 
 export function HistoricoSemana({
   semanaId,
+  estado,
   aoRestaurar,
   podeEditar,
 }: {
   semanaId: string;
+  estado: EstadoSemana;
   aoRestaurar: (estado: EstadoSemana) => void;
   podeEditar: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [versoes, setVersoes] = useState<VersaoSemana[]>([]);
+  const [salvoEm, setSalvoEm] = useState<string | null>(null);
 
   const recarregar = () => setVersoes(lerVersoes('semana.' + semanaId));
 
@@ -53,8 +57,36 @@ export function HistoricoSemana({
     toast(`Cardápio restaurado para a versão de ${quando(v.em)}`);
   };
 
+  /**
+   * "Salvar cardápio": confirma que está guardado e cria um ponto de retorno
+   * nomeado. O app já salva sozinho a cada alteração — o valor daqui é a
+   * confirmação explícita ("terminei, está salvo") e o marco para restaurar.
+   * Regravar o documento também reempurra a semana para a nuvem.
+   */
+  const salvar = () => {
+    registrarVersao('semana.' + semanaId, estado, 'marco');
+    aoRestaurar(estado); // regrava o estado atual → sincroniza e confirma
+    recarregar();
+    const agora = new Date();
+    setSalvoEm(agora.toISOString());
+    toast(
+      supabaseHabilitado()
+        ? `Cardápio salvo às ${agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} — enviado para os outros aparelhos`
+        : `Cardápio salvo às ${agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} neste aparelho`,
+    );
+  };
+
   return (
-    <div className="print:hidden">
+    <div className="space-y-2 print:hidden">
+      <div className="flex flex-wrap items-center gap-3">
+        <Botao onClick={salvar}>Salvar cardápio</Botao>
+        {salvoEm && (
+          <span className="text-caption font-semibold text-brand-700 dark:text-brand-300">
+            ✓ salvo às {quando(salvoEm).split(' ').pop()}
+          </span>
+        )}
+      </div>
+
       <button
         type="button"
         onClick={() => setAberto((x) => !x)}
@@ -80,7 +112,7 @@ export function HistoricoSemana({
                   <p className="text-xs font-bold text-carvao-900 dark:text-white">
                     {quando(v.em)}{' '}
                     <span className="font-normal text-carvao-500 dark:text-areia-400">
-                      · {v.origem === 'nuvem' ? 'antes de mudar pela nuvem' : 'antes de uma edição aqui'}
+                      · {v.origem === 'marco' ? 'salvo por você' : v.origem === 'nuvem' ? 'antes de mudar pela nuvem' : 'antes de uma edição aqui'}
                     </span>
                   </p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-carvao-600 dark:text-areia-300">

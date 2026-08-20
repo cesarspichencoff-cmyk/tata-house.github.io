@@ -882,6 +882,7 @@ export default function PaginaCardapios() {
                       estado={estado}
                       atualizar={atualizar}
                       semanaId={semanaId}
+                      fatores={fatores}
                       podeEditar={podeEditarCardapio}
                       precos={precos}
                       definirPreco={definirPreco}

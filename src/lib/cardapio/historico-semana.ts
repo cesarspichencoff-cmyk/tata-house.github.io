@@ -21,7 +21,8 @@ const MAX_VERSOES = 20;
 
 export interface VersaoSemana {
   em: string; // ISO
-  origem: 'local' | 'nuvem';
+  /** 'marco' = ponto salvo de propósito pela pessoa (botão Salvar). */
+  origem: 'local' | 'nuvem' | 'marco';
   estado: EstadoSemana;
 }
 
@@ -57,7 +58,9 @@ export function registrarVersao(
   try {
     const versoes = lerVersoes(semanaId);
     const serializado = JSON.stringify(anterior);
-    if (versoes[0] && JSON.stringify(versoes[0].estado) === serializado) return; // nada mudou
+    // Um "marco" é um ponto de retorno pedido pela pessoa: registra mesmo
+    // que nada tenha mudado desde a última foto.
+    if (origem !== 'marco' && versoes[0] && JSON.stringify(versoes[0].estado) === serializado) return;
     const nova: VersaoSemana = {
       em: new Date().toISOString(),
       origem,

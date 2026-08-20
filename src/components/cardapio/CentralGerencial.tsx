@@ -25,7 +25,7 @@ import {
   periodoSemana,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
-import { indiceNutricionalSemana } from '@/lib/cardapio/nutricional';
+import { indiceNutricionalSemana } from '@/lib/cardapio/nutricao-prato';
 import type { EstadoSemana, HistoricoPrecos, Aceitacao } from '@/lib/cardapio/tipos';
 
 function baixarCsv(nome: string, linhas: string[][]) {

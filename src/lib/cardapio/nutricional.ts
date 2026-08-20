@@ -6,7 +6,6 @@
 
 import { normalizar } from './motor';
 import { receitaDoPrato } from './receitas';
-import type { DiaCardapio } from './tipos';
 
 /** Índice de saúde (0–100) a partir dos macros por porção. */
 function saudavelDeMacros(n: {
@@ -153,44 +152,4 @@ export function infoNutricional(prato: string | null | undefined): InfoNutricion
     }
   }
   return null;
-}
-
-/* Índice Nutricional da semana (0–100) */
-export function indiceNutricionalSemana(dias: DiaCardapio[]): {
-  score: number;
-  rotulo: string;
-  cor: string;
-  detalhes: string[];
-} {
-  const pratos = dias.filter((d) => d.principal).map((d) => infoNutricional(d.principal)).filter(Boolean) as InfoNutricional[];
-
-  if (pratos.length === 0) return { score: 0, rotulo: 'Sem dados', cor: 'carvao', detalhes: [] };
-
-  const detalhes: string[] = [];
-  let score = 100;
-
-  const mediaKcal = pratos.reduce((a, p) => a + p.kcal, 0) / pratos.length;
-  if (mediaKcal > 480) { score -= 10; detalhes.push('Calorias acima do ideal (>480 kcal/prato)'); }
-  else if (mediaKcal < 250) { score -= 5; detalhes.push('Calorias abaixo do ideal (<250 kcal/prato)'); }
-
-  const mediaSodio = pratos.reduce((a, p) => a + p.sodio, 0) / pratos.length;
-  if (mediaSodio > 700) { score -= 15; detalhes.push('Sódio elevado (>700 mg/prato)'); }
-  else if (mediaSodio > 500) { score -= 8; detalhes.push('Sódio moderadamente alto'); }
-
-  const mediaGordura = pratos.reduce((a, p) => a + p.gorduras, 0) / pratos.length;
-  if (mediaGordura > 26) { score -= 12; detalhes.push('Gordura total elevada (>26 g/prato)'); }
-
-  const mediaProteina = pratos.reduce((a, p) => a + p.proteinas, 0) / pratos.length;
-  if (mediaProteina < 20) { score -= 10; detalhes.push('Proteína baixa (<20 g/prato)'); }
-  else if (mediaProteina >= 30) { score += 5; detalhes.push('Boa densidade proteica (≥30 g/prato)'); }
-
-  // variedade (índices individuais)
-  const mediaIndividual = pratos.reduce((a, p) => a + p.indiceSaudavel, 0) / pratos.length;
-  score = Math.round((score + mediaIndividual) / 2);
-  score = Math.max(0, Math.min(100, score));
-
-  const rotulo = score >= 80 ? 'Saudável' : score >= 60 ? 'Equilibrado' : 'Necessita ajustes';
-  const cor = score >= 80 ? 'brand' : score >= 60 ? 'ouro' : 'vermelho';
-
-  return { score, rotulo, cor, detalhes };
 }

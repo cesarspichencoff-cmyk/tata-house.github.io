@@ -15,6 +15,7 @@ import {
   temHistoricoExato,
   validarSemana,
   listaDoDia,
+  linhasDoDia,
   fonteIngredientes,
   formatarReais,
   normalizar,
@@ -22,13 +23,14 @@ import {
 import { custoTipado, resolverPreco } from '@/lib/cardapio/precos';
 import { RECEITAS_POR_CATEGORIA, GUARNICOES_FIXAS } from '@/lib/cardapio/receitas';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
-import { useAceitacao, semanasComConteudo, lerSemana } from '@/lib/cardapio/estado';
+import { useAceitacao, semanasComConteudo, lerSemana, useMostrarBasicos } from '@/lib/cardapio/estado';
 import type { Aceitacao, DiaCardapio, EstadoSemana, Proteina } from '@/lib/cardapio/tipos';
 import { SeletorPrato } from './SeletorPrato';
 import { OperacaoDia } from './OperacaoDia';
 import { PrevisaoPresenca } from './PrevisaoPresenca';
 import { ComoFazer } from './ComoFazer';
 import { HistoricoSemana } from './HistoricoSemana';
+import { custoDaSemana } from '@/lib/cardapio/custo-semana';
 import { NutricaoPrato } from './NutricaoPrato';
 import { AntiMonotonia } from './AntiMonotonia';
 import { TermometroAlmoco } from './TermometroAlmoco';
@@ -127,6 +129,7 @@ export function AbaCardapio({
   estado,
   atualizar,
   semanaId,
+  fatores,
   podeEditar,
   precos,
   definirPreco,
@@ -139,6 +142,7 @@ export function AbaCardapio({
   estado: EstadoSemana;
   atualizar: (fn: (e: EstadoSemana) => EstadoSemana) => void;
   semanaId: string;
+  fatores?: Record<string, number>;
   podeEditar: boolean;
   precos: Record<string, number>;
   definirPreco?: (itemNorm: string, valor: number | null, nome?: string) => void;
@@ -149,6 +153,9 @@ export function AbaCardapio({
   itensExtras?: Record<string, { n: string; u: string }>;
 }) {
   const { estimativas, gerarEstimativas } = useEstimativas();
+  // MESMA preferência da lista de compras — se os conjuntos de itens
+  // divergirem, os custos das duas telas voltam a discordar.
+  const { mostrarBasicos } = useMostrarBasicos();
   const { aceitacao } = useAceitacao();
   const [opDia, setOpDia] = useState(false);
   const [gerarAberto, setGerarAberto] = useState(false);
@@ -268,20 +275,12 @@ export function AbaCardapio({
       return { ...prev, [lista]: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
     });
 
-  const custoSemana = estado.dias.reduce(
-    (acc, d) => {
-      if (!d.principal) return acc;
-      const itens = listaDoDia(d).map((s) => ({ norm: normalizar(s.item), qtd: s.qtd, unid: s.unid }));
-      const c = custoTipado(itens, precos, estimativas);
-      return {
-        total: acc.total + c.total,
-        real: acc.real + c.real,
-        estimado: acc.estimado + c.estimado,
-        itens: acc.itens + itens.length,
-      };
-    },
-    { total: 0, real: 0, estimado: 0, itens: 0 },
-  );
+  // FONTE ÚNICA de custo (custo-semana.ts): as MESMAS quantidades da lista
+  // de compras — com ajustes da cozinha, itens removidos, itens manuais e
+  // fatores de aprendizado — e o preço resolvido em todas as camadas.
+  // Antes esta tela somava a lista BASE, então mostrava o custo de uma
+  // lista que ninguém ia comprar.
+  const custoSemana = custoDaSemana(estado, precos, estimativas, { fatores, mostrarBasicos });
 
   // medidor de regras (rotação de proteínas)
   const prots = estado.dias.map((d) => (d.principal ? proteinaDoPrato(d.principal) : null));
@@ -292,8 +291,8 @@ export function AbaCardapio({
   const erros = avisos.filter((a) => a.nivel === 'erro').length;
   const alertas = avisos.filter((a) => a.nivel === 'alerta').length;
 
-  const totalPessoas = estado.dias.filter((d) => d.principal).reduce((a, d) => a + d.pessoas, 0);
-  const custoRef = totalPessoas > 0 && custoSemana.total > 0 ? custoSemana.total / totalPessoas : null;
+  const totalPessoas = custoSemana.totalPessoas;
+  const custoRef = custoSemana.porRefeicao;
   const dentroOrcamento = estado.orcamento ? custoSemana.total <= estado.orcamento : null;
 
   // classifica os itens da semana por tipo de preço: real / estimado / sem
@@ -301,14 +300,16 @@ export function AbaCardapio({
     const sem = new Map<string, { item: string; unid: string }>();
     const est = new Set<string>();
     const todos = new Set<string>();
-    estado.dias.forEach((d) => {
+    estado.dias.forEach((d, di) => {
       if (!d.principal) return;
-      // usa listaDoDia para que semPreco/normsSemana reflitam a mesma base do custo
-      listaDoDia(d).forEach((s) => {
-        const norm = normalizar(s.item);
+      // Mesma base do custo (custo-semana.ts): quantidades reais, com
+      // ajustes/manuais/fatores — senão a lista de "sem preço" descreveria
+      // um conjunto de itens diferente do que foi somado.
+      linhasDoDia(estado, di, fatores, { mostrarBasicos }).forEach((l) => {
+        const norm = normalizar(l.item);
         todos.add(norm);
         const tipo = resolverPreco(norm, precos, estimativas).tipo;
-        if (tipo === 'sem') sem.set(norm, { item: s.item, unid: s.unid });
+        if (tipo === 'sem') sem.set(norm, { item: l.item, unid: l.unid });
         else if (tipo === 'historico' || tipo === 'estimado') est.add(norm);
       });
     });
@@ -683,7 +684,7 @@ export function AbaCardapio({
                     <ComoFazer prato={dia.principal} />
                   </div>
                   {/* Nutrição por prato — visão principal (item 1) */}
-                  <NutricaoPrato prato={dia.principal} />
+                  <NutricaoPrato dia={dia} />
                 </>
               )}
             </Cartao>
@@ -708,6 +709,7 @@ export function AbaCardapio({
       {/* Desfazer: volta a semana a uma versão anterior deste aparelho */}
       <HistoricoSemana
         semanaId={semanaId}
+        estado={estado}
         podeEditar={podeEditar}
         aoRestaurar={(anterior) => atualizar(() => anterior)}
       />

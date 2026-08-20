@@ -8,7 +8,7 @@ import { Icone } from '@/components/Icones';
 import { datasDaSemana } from '@/lib/cardapio/estado';
 import { imagemParaDataUrl, useLogo } from '@/lib/cardapio/logo';
 import { proteinaDoPrato } from '@/lib/cardapio/motor';
-import { infoNutricional } from '@/lib/cardapio/nutricional';
+import { nutricaoDoPratoMontado } from '@/lib/cardapio/nutricao-prato';
 import type { EstadoSemana } from '@/lib/cardapio/tipos';
 
 /* =====================================================================
@@ -47,16 +47,19 @@ export function PosterSemana({
   const { logo, setLogo } = useLogo();
   const inputLogo = useRef<HTMLInputElement>(null);
 
-  // Nutrição — puxada dos mesmos dados do app (kcal e macros reais)
-  const infosDia = estado.dias.map((d) => infoNutricional(d.principal));
+  // Nutrição do PRATO MONTADO (proteína + arroz + feijão + guarnição +
+  // salada), conforme a revisão do nutricionista. Antes media só a
+  // proteína, o que deixava o carboidrato irreal (~17 g num almoço com
+  // arroz e feijão) e a gordura dominando o perfil.
+  const infosDia = estado.dias.map((d) => nutricaoDoPratoMontado(d));
   const comInfo = infosDia.filter((x): x is NonNullable<typeof x> => !!x);
   const mediaNutri = comInfo.length
     ? {
         kcal: Math.round(comInfo.reduce((a, p) => a + p.kcal, 0) / comInfo.length),
-        proteinas: Math.round(comInfo.reduce((a, p) => a + p.proteinas, 0) / comInfo.length),
-        carboidratos: Math.round(comInfo.reduce((a, p) => a + p.carboidratos, 0) / comInfo.length),
-        gorduras: Math.round(comInfo.reduce((a, p) => a + p.gorduras, 0) / comInfo.length),
-        fibras: Math.round(comInfo.reduce((a, p) => a + p.fibras, 0) / comInfo.length),
+        proteinas: Math.round(comInfo.reduce((a, p) => a + p.prot, 0) / comInfo.length),
+        carboidratos: Math.round(comInfo.reduce((a, p) => a + p.carb, 0) / comInfo.length),
+        gorduras: Math.round(comInfo.reduce((a, p) => a + p.gord, 0) / comInfo.length),
+        fibras: Math.round(comInfo.reduce((a, p) => a + p.fibra, 0) / comInfo.length),
       }
     : null;
 
@@ -241,7 +244,7 @@ export function PosterSemana({
             ctx.fillText('KCAL', x0 + cw - 24, y + cardH / 2 + 16);
             ctx.fillStyle = 'rgba(255,255,255,0.85)';
             ctx.font = `600 14px ${SANS}, sans-serif`;
-            ctx.fillText(`${nut.proteinas}g prot.`, x0 + cw - 24, y + cardH / 2 + 38);
+            ctx.fillText(`${nut.prot}g prot.`, x0 + cw - 24, y + cardH / 2 + 38);
           }
         } else {
           ctx.textAlign = 'left';
@@ -265,7 +268,7 @@ export function PosterSemana({
         ctx.fillText('Informação nutricional', x0 + 28, y + 40);
         ctx.fillStyle = '#007638';
         ctx.font = `600 14px ${SANS}, sans-serif`;
-        ctx.fillText('Média por prato principal · cuidamos do que você come', x0 + 28, y + 62);
+        ctx.fillText('Média do prato montado (~500 g) · cuidamos do que você come', x0 + 28, y + 62);
         const macros: [string, string, string][] = [
           [`${mediaNutri.kcal}`, 'Calorias', '#92713a'],
           [`${mediaNutri.proteinas}g`, 'Proteína', '#007638'],
@@ -448,7 +451,7 @@ export function PosterSemana({
                       </span>
                       <span className="text-[9px] font-bold uppercase tracking-wide text-white/60">kcal</span>
                       <span className="mt-1 text-[11px] font-semibold text-white/85 tabular-nums">
-                        {nut.proteinas}g prot.
+                        {nut.prot}g prot.
                       </span>
                     </>
                   ) : (
