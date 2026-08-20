@@ -976,6 +976,7 @@ export default function PaginaCardapios() {
                   <AbaCompras
                     estado={estado}
                     atualizar={atualizar}
+                    semanaId={semanaId}
                     papel={papel}
                     precos={precos}
                     fornecedores={fornecedores}

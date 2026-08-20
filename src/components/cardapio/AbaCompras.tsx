@@ -19,6 +19,7 @@ import { pode } from '@/lib/cardapio/org';
 import type { EstadoSemana, HistoricoPrecos, Papel, StatusItem } from '@/lib/cardapio/tipos';
 import { ListaCompras } from './ListaCompras';
 import { ConciliacaoSemana } from './ConciliacaoSemana';
+import { PlanejadoVsReal } from './PlanejadoVsReal';
 
 function hojeIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -50,6 +51,7 @@ function comprimirImagem(file: File): Promise<string> {
 export function AbaCompras({
   estado,
   atualizar,
+  semanaId,
   papel,
   precos,
   fornecedores = {},
@@ -62,6 +64,7 @@ export function AbaCompras({
 }: {
   estado: EstadoSemana;
   atualizar: (fn: (e: EstadoSemana) => EstadoSemana) => void;
+  semanaId: string;
   papel: Papel;
   precos: Record<string, number>;
   fornecedores?: Record<string, string>;
@@ -341,6 +344,16 @@ export function AbaCompras({
           onEditManual={editManual}
         />
       )}
+
+      {/* Planejado × gasto real — o setor de compras seguiu o cardápio? */}
+      <PlanejadoVsReal
+        estado={estado}
+        semanaId={semanaId}
+        precos={precos}
+        estimativas={estimativas}
+        fatores={fatores}
+        mostrarBasicos={mostrarBasicos}
+      />
 
       {/* Conciliação automática — preço vs histórico e quantidade vs cardápio */}
       <ConciliacaoSemana estado={estado} precos={precos} />
