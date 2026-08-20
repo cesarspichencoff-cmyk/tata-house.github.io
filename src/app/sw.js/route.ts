@@ -1,12 +1,24 @@
 /* =====================================================================
-   Service worker do Tatá House (PWA offline). Sem dependências.
-   - Guarda a "casca" do app (HTML/JS/CSS/ícones) para abrir sem internet.
-   - Navegações: rede primeiro, cache como reserva.
-   - Demais arquivos do próprio site: cache primeiro, rede como reserva.
-   - Chamadas ao Supabase e a outros domínios passam direto pela rede.
+   Service worker gerado no build (não é mais um arquivo estático em
+   public/). O nome do cache carrega a versão do build — cada deploy vira
+   um cache novo, e o `activate` do próprio worker apaga o anterior.
+
+   Por que isso importa: antes, o nome do cache era fixo ('tata-house-v1')
+   pra sempre. Um deploy novo não invalidava nada automaticamente — só um
+   "limpar dados do site" manual resolvia um aparelho que ficasse preso
+   num estado antigo. Isso não é aceitável para a equipe (baixa
+   familiaridade com celular, não dá pra pedir "limpa o cache" toda
+   semana). Agora a limpeza é automática, a cada deploy, sem ação humana.
    ===================================================================== */
 
-const CACHE = 'tata-house-v1';
+export const dynamic = 'force-static';
+
+const VERSAO_BUILD = process.env.GITHUB_SHA ?? String(Date.now());
+
+function gerarServiceWorker(versao: string): string {
+  return `/* Gerado no build — versão ${versao}. Não editar direto; edite src/app/sw.js/route.ts */
+
+const CACHE = 'tata-house-${versao}';
 const ESSENCIAIS = [
   '/',
   '/manifest.webmanifest',
@@ -69,3 +81,15 @@ self.addEventListener('fetch', (e) => {
     ),
   );
 });
+`;
+}
+
+export function GET() {
+  return new Response(gerarServiceWorker(VERSAO_BUILD), {
+    headers: {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Service-Worker-Allowed': '/',
+    },
+  });
+}

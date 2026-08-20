@@ -33,8 +33,34 @@ export function BootNuvem() {
     if (typeof window === 'undefined') return;
 
     // 0) Service worker (PWA offline) — independe do Supabase.
+    //
+    // O nome do cache do worker carrega a versão do build (ver
+    // src/app/sw.js/route.ts): cada deploy é um cache novo, e o próprio
+    // worker apaga o anterior no `activate`. Falta só o lado do
+    // navegador: sem isto, uma aba já aberta continua rodando o JS
+    // ANTIGO em memória mesmo depois do novo worker assumir — só um
+    // "limpar dados do site" manual resolvia. A equipe (baixa
+    // familiaridade com celular) não pode depender disso. Então: assim
+    // que um worker novo assume o controle, recarrega a página sozinho,
+    // uma única vez, e verifica se há atualização sempre que a aba volta
+    // a ficar visível (celular/tablet ligado o dia todo na cozinha).
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      let jaRecarregou = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (jaRecarregou) return;
+        jaRecarregou = true;
+        window.location.reload();
+      });
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registro) => {
+          const verificarAtualizacao = () => {
+            if (document.visibilityState === 'visible') registro.update().catch(() => {});
+          };
+          document.addEventListener('visibilitychange', verificarAtualizacao);
+          window.addEventListener('focus', verificarAtualizacao);
+        })
+        .catch(() => {});
     }
 
     if (!supabaseHabilitado()) {
