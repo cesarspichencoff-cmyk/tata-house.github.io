@@ -54,6 +54,20 @@ export function AvisoCritico() {
     );
   }
 
+  // Nuvem desligada (site publicado sem as credenciais). O app continua
+  // funcionando, mas SÓ neste aparelho: nada é enviado nem recebido, e cada
+  // pessoa enxerga apenas o que digitou. Isso precisa ser gritante — o
+  // silêncio aqui é o que fez uma equipe inteira acreditar, por semanas, que
+  // estava trabalhando no mesmo cardápio quando eram ilhas separadas.
+  if (status === 'desligado') {
+    return (
+      <Banner cor="bg-perigo">
+        Este aparelho NÃO está sincronizando — o que você digitar fica só aqui e ninguém mais vê.
+        Confira em Ajustes → “A sincronização está funcionando?”.
+      </Banner>
+    );
+  }
+
   if (status === 'erro' && erroSustentado) {
     return (
       <Banner cor="bg-alerta">

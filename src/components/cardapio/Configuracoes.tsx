@@ -5,6 +5,7 @@ import { toast } from '@/components/Toast';
 import { Botao } from '@/components/ui';
 import { PERFIS, useLogin } from '@/lib/cardapio/login';
 import { zerarAvaliacoesPratos } from '@/lib/cardapio/estado';
+import { DiagnosticoNuvem } from '@/components/cardapio/DiagnosticoNuvem';
 
 export function Configuracoes() {
   const { definirPin } = useLogin();
@@ -30,6 +31,8 @@ export function Configuracoes() {
 
   return (
     <div className="space-y-4">
+      <DiagnosticoNuvem />
+
       <div className="flex items-start gap-3 rounded-2xl bg-carvao-50 px-4 py-3.5 dark:bg-carvao-800/50">
         <span className="text-xl">🔒</span>
         <div>

@@ -13,11 +13,13 @@ const MAPA = {
   online:        { cor: 'bg-brand-500',                     pulse: false, rotulo: 'Sincronizado' },
   sincronizando: { cor: 'bg-alerta',                        pulse: true,  rotulo: 'Salvando…' },
   erro:          { cor: 'bg-perigo',                        pulse: false, rotulo: 'Sem conexão' },
+  // Antes este estado renderizava NADA — um app sem nuvem parecia idêntico a
+  // um app sincronizando. Agora ele se declara, como qualquer outro estado.
+  desligado:     { cor: 'bg-perigo',                        pulse: false, rotulo: 'Sem sincronizar' },
 } as const;
 
 export function IndicadorNuvem() {
   const { status, ultima } = useStatusNuvem();
-  if (status === 'desligado') return null;
 
   const m = MAPA[status];
   const hora = ultima

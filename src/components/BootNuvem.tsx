@@ -177,6 +177,7 @@ export function BootNuvem() {
     // atualizando o estado React in-place. Semanas passam pelo merge 3-vias.
     const aplicarLocal = (chave: string, valorNuvem: unknown): boolean => {
       if (valorNuvem === null || valorNuvem === undefined) return false;
+      if (chave.startsWith('__')) return false; // marcadores/sondas: nunca vêm da nuvem
       if (chave.startsWith('semana.')) return aplicarSemana(chave, valorNuvem as EstadoSemana);
       const novo = JSON.stringify(valorNuvem);
       if (novo !== localStorage.getItem(PREFIXO + chave)) {
@@ -242,7 +243,7 @@ export function BootNuvem() {
         const cliente = sb as unknown as { channel: (nome: string) => unknown };
         const ch = cliente.channel('tata_estado_rt') as {
           on: (ev: string, cfg: unknown, cb: (p: { new?: { chave?: string; valor?: unknown } }) => void) => typeof ch;
-          subscribe: () => { unsubscribe: () => void };
+          subscribe: (cb?: (status: string) => void) => { unsubscribe: () => void };
         };
         canal = ch
           .on(
@@ -256,8 +257,14 @@ export function BootNuvem() {
               aplicarLocal(linha.chave, linha.valor); // reconcilia in-place, sem reload
             },
           )
-          .subscribe();
-        definirStatusNuvem('online');
+          // `subscribe()` retorna na hora, ANTES de saber se a conexão foi
+          // aceita — declarar 'online' logo após era mentira: um aparelho sem
+          // conseguir alcançar a nuvem mostrava a bolinha verde "Sincronizado"
+          // do mesmo jeito. Agora o status vem do resultado real da inscrição.
+          .subscribe((status: string) => {
+            if (status === 'SUBSCRIBED') definirStatusNuvem('online');
+            else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') definirStatusNuvem('erro');
+          });
       } catch {
         /* realtime indisponível: segue com boot + espelhamento */
       }
