@@ -23,6 +23,7 @@ import {
   aguardarBootNuvem,
 } from '@/lib/cardapio/supabase';
 import { FilaPorChave } from '@/lib/cardapio/supabase/fila-por-chave';
+import { ehEcoProprio, type EcoRecente } from '@/lib/cardapio/supabase/eco-realtime';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
 import {
   aplicarRawRemoto,
@@ -114,9 +115,10 @@ export function BootNuvem() {
 
     // chaves que ESTE aparelho acabou de gravar — para ignorar o próprio eco
     // quando o Realtime devolver a mudança que nós mesmos fizemos.
-    const recentes: Map<string, number> =
-      (window as unknown as { __nuvemRecentes?: Map<string, number> }).__nuvemRecentes ??
-      ((window as unknown as { __nuvemRecentes?: Map<string, number> }).__nuvemRecentes = new Map());
+    const recentes: Map<string, EcoRecente> =
+      (window as unknown as { __nuvemRecentesV2?: Map<string, EcoRecente> }).__nuvemRecentesV2 ??
+      ((window as unknown as { __nuvemRecentesV2?: Map<string, EcoRecente> }).__nuvemRecentesV2 =
+        new Map());
 
     // Outbox offline: chaves cuja última subida à nuvem FALHOU (wifi caiu).
     // Persistem no localStorage e são reenviadas ao reconectar — sem isso,
@@ -173,7 +175,7 @@ export function BootNuvem() {
       const tarefa = fila.enfileirar(k, async () => {
         // Atualiza o carimbo no momento da escrita real (uma versão pode ter
         // esperado outra da mesma chave terminar).
-        recentes.set(k, Date.now());
+        recentes.set(k, { ts: Date.now(), valor });
         await armazenamentoSupabase.gravar(k, valor);
       });
 
@@ -235,7 +237,6 @@ export function BootNuvem() {
         if (typeof chave === 'string' && chave.startsWith(PREFIXO)) {
           const k = chave.slice(PREFIXO.length);
           if (!k.startsWith('__')) {
-            recentes.set(k, Date.now());
             try {
               void subir(k, JSON.parse(valor));
             } catch {
@@ -295,7 +296,6 @@ export function BootNuvem() {
       // para toda a equipe. Aqui o aparelho apenas se alinha à nuvem e volta a
       // ter base, e qualquer edição real feita depois sobe normalmente.
       if (base && !ig(merged, remote)) {
-        recentes.set(chave, Date.now());
         subir(chave, merged);
       }
       return mudouLocal;
@@ -421,8 +421,11 @@ export function BootNuvem() {
             (payload) => {
               const linha = payload.new;
               if (!linha || typeof linha.chave !== 'string') return;
-              const ts = recentes.get(linha.chave);
-              if (ts && Date.now() - ts < 8000) return; // eco da nossa própria escrita
+              const eco = recentes.get(linha.chave);
+              if (ehEcoProprio(eco, linha.valor)) return; // eco EXATO da nossa escrita
+
+              // Se outra pessoa alterou a mesma chave dentro da janela, o
+              // valor é diferente e entra imediatamente em vez de ser perdido.
               aplicarLocal(linha.chave, linha.valor); // reconcilia in-place, sem reload
             },
           )
