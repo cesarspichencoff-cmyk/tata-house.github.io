@@ -98,3 +98,22 @@ export function mesclarDocumentoConcorrente(base: unknown, local: unknown, remot
   const r = mesclarNo(base, local, remoto, '');
   return { valor: r.valor === AUSENTE ? null : r.valor, conflitos: r.conflitos };
 }
+
+/** Fail-closed para payloads herdados sem ancestral conhecido.
+ * Sem base nao existe 3-way merge honesto: se local e remoto divergem,
+ * preservamos o local na outbox e bloqueamos o envio em vez de fingir que
+ * o remoto era a base e sobrescrever outro aparelho. */
+export function mesclarDocumentoConcorrenteSeguro(
+  baseConhecida: boolean,
+  base: unknown,
+  local: unknown,
+  remoto: unknown,
+): ResultadoMesclaConcorrente {
+  if (!baseConhecida) {
+    if (serializarCanonico(local) === serializarCanonico(remoto)) {
+      return { valor: local, conflitos: [] };
+    }
+    return { valor: local, conflitos: ['(base-desconhecida)'] };
+  }
+  return mesclarDocumentoConcorrente(base, local, remoto);
+}

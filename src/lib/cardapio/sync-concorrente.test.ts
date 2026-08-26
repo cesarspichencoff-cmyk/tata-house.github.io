@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mesclarDocumentoConcorrente } from './sync-concorrente';
+import { mesclarDocumentoConcorrente, mesclarDocumentoConcorrenteSeguro } from './sync-concorrente';
 
 describe('sync-concorrente', () => {
   it('preserva edicoes simultaneas em itens diferentes do mesmo mapa', () => {
@@ -39,5 +39,37 @@ describe('sync-concorrente', () => {
     const r = mesclarDocumentoConcorrente(base, local, remoto);
     expect(r.conflitos).toEqual([]);
     expect((r.valor as unknown[])).toHaveLength(3);
+  });
+
+  it('aceita segunda edicao do mesmo aparelho quando o valor anterior e a base', () => {
+    const r = mesclarDocumentoConcorrente(
+      { arroz: 11 },
+      { arroz: 12 },
+      { arroz: 11 },
+    );
+    expect(r.conflitos).toEqual([]);
+    expect(r.valor).toEqual({ arroz: 12 });
+  });
+
+  it('bloqueia pendencia herdada divergente quando nao existe base conhecida', () => {
+    const r = mesclarDocumentoConcorrenteSeguro(
+      false,
+      undefined,
+      { arroz: 11 },
+      { arroz: 12 },
+    );
+    expect(r.conflitos).toEqual(['(base-desconhecida)']);
+    expect(r.valor).toEqual({ arroz: 11 });
+  });
+
+  it('libera pendencia sem base quando local e remoto ja sao identicos', () => {
+    const r = mesclarDocumentoConcorrenteSeguro(
+      false,
+      undefined,
+      { arroz: 12 },
+      { arroz: 12 },
+    );
+    expect(r.conflitos).toEqual([]);
+    expect(r.valor).toEqual({ arroz: 12 });
   });
 });

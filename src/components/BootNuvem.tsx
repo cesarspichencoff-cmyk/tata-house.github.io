@@ -33,7 +33,7 @@ import {
 import { ehChaveEstadoGrande } from '@/lib/cardapio/estado-grande-merge';
 import { inicializarOutbox, listarOutbox, removerOutbox, salvarOutbox } from '@/lib/cardapio/sync-outbox';
 import { adicionarEcoRecente, ehEcoProprio, serializarCanonico, type EcoRecente } from '@/lib/cardapio/sync-util';
-import { ehChaveConcorrente, mesclarDocumentoConcorrente } from '@/lib/cardapio/sync-concorrente';
+import { ehChaveConcorrente, mesclarDocumentoConcorrenteSeguro } from '@/lib/cardapio/sync-concorrente';
 import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
@@ -181,14 +181,14 @@ export function BootNuvem() {
           try {
             if (ehChaveConcorrente(k)) {
               const remoto = await armazenamentoSupabase.ler<unknown>(k, null);
-              const base = baseHint !== undefined
-                ? baseHint
-                : (basesConcorrentes.has(k) ? basesConcorrentes.get(k) : remoto);
-              const mescla = mesclarDocumentoConcorrente(base, valor, remoto);
+              const temBase = baseHint !== undefined || basesConcorrentes.has(k);
+              const base = baseHint !== undefined ? baseHint : basesConcorrentes.get(k);
+              const mescla = mesclarDocumentoConcorrenteSeguro(temBase, base, valor, remoto);
               if (mescla.conflitos.length > 0) {
                 pendentesConhecidos.add(k);
                 atualizarFilaVisual();
                 definirStatusNuvem('erro');
+                console.warn('[sync] conflito preservado; envio bloqueado', k, mescla.conflitos);
                 return;
               }
               valorEnviar = mescla.valor;
@@ -198,6 +198,14 @@ export function BootNuvem() {
             await armazenamentoSupabase.gravar(k, valorEnviar);
 
             if (revisoes.get(k) === revisao) {
+              // Primeiro elimina a marca legada; se isso falhar, preserva a
+              // outbox duravel para que a proxima rodada possa tentar de novo.
+              if (!marcarPendenteLegado(k, false)) {
+                pendentesConhecidos.add(k);
+                atualizarFilaVisual();
+                definirStatusNuvem('erro');
+                return;
+              }
               if (outboxDuravel) {
                 try {
                   await removerOutbox(k);
@@ -208,7 +216,6 @@ export function BootNuvem() {
                   return;
                 }
               }
-              marcarPendenteLegado(k, false);
               pendentesConhecidos.delete(k);
 
               if (ehChaveConcorrente(k)) {
@@ -269,7 +276,12 @@ export function BootNuvem() {
       let migrouTudo = true;
       for (const k of lerPendentesLegado()) {
         const raw = localStorage.getItem(PREFIXO + k);
-        if (raw == null) continue;
+        if (raw == null) {
+          // Uma marca sem payload nao pode ser declarada migrada: isso e
+          // exatamente o caso perigoso de quota cheia em versoes antigas.
+          migrouTudo = false;
+          continue;
+        }
         try { await salvarOutbox(k, JSON.parse(raw)); } catch { migrouTudo = false; }
       }
       if (migrouTudo) {
@@ -316,7 +328,10 @@ export function BootNuvem() {
 
         if (ehTata && !k.startsWith('__')) {
           try {
-            subir(k, JSON.parse(valor), ehChaveConcorrente(k) ? basesConcorrentes.get(k) : undefined);
+            // A base desta edicao e o valor imediatamente anterior que ESTE
+            // setItem observou. Isso evita falso conflito quando o mesmo
+            // aparelho faz duas edicoes rapidas antes do primeiro upload.
+            subir(k, JSON.parse(valor), ehChaveConcorrente(k) ? valorAnterior : undefined);
           } catch {
             /* valor não-JSON: fica apenas local (ex.: chave Groq/texto bruto) */
           }
@@ -396,7 +411,7 @@ export function BootNuvem() {
           if (pendentesConhecidos.has(chave)) return false;
           basesConcorrentes.set(chave, valorNuvem);
         } else {
-          const mescla = mesclarDocumentoConcorrente(basesConcorrentes.get(chave), localAtual, valorNuvem);
+          const mescla = mesclarDocumentoConcorrenteSeguro(true, basesConcorrentes.get(chave), localAtual, valorNuvem);
           if (mescla.conflitos.length > 0) {
             pendentesConhecidos.add(chave);
             atualizarFilaVisual();
