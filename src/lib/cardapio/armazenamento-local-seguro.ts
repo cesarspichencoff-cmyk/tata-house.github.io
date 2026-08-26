@@ -11,13 +11,27 @@
 const PREFIXO_HISTORICO = 'cardapio.v1.__hist.';
 
 export function ehErroDeQuota(erro: unknown): boolean {
-  if (!(erro instanceof Error)) return false;
-  const nome = erro.name;
+  // Safari/WebKit normalmente lança DOMException; não podemos depender de
+  // `instanceof Error`, porque isso varia entre engines/versões.
+  if (erro == null || (typeof erro !== 'object' && typeof erro !== 'function')) return false;
+
+  const info = erro as {
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+  };
+
+  const nome = typeof info.name === 'string' ? info.name : '';
+  const mensagem = typeof info.message === 'string' ? info.message : '';
+  const codigo = typeof info.code === 'number' ? info.code : null;
+
   return (
     nome === 'QuotaExceededError' ||
     nome === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+    codigo === 22 ||   // WebKit / DOMException legado
+    codigo === 1014 || // Firefox legado
     /quota/i.test(nome) ||
-    /quota/i.test(erro.message)
+    /quota/i.test(mensagem)
   );
 }
 

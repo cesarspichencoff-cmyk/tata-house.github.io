@@ -34,6 +34,23 @@ describe('armazenamento-local-seguro', () => {
     expect(ehErroDeQuota(e)).toBe(true);
   });
 
+  it('reconhece DOMException-like do Safari mesmo sem instanceof Error', () => {
+    const safari = {
+      name: 'QuotaExceededError',
+      message: 'The quota has been exceeded.',
+      code: 22,
+    };
+    expect(ehErroDeQuota(safari)).toBe(true);
+  });
+
+  it('reconhece código legado 22 do WebKit', () => {
+    expect(ehErroDeQuota({ name: 'DOMException', message: '', code: 22 })).toBe(true);
+  });
+
+  it('não confunde um objeto qualquer com erro de quota', () => {
+    expect(ehErroDeQuota({ name: 'SecurityError', message: 'Blocked', code: 18 })).toBe(false);
+  });
+
   it('remove somente históricos __hist.*', () => {
     const s = new StorageFake();
     s.dados.set('cardapio.v1.__hist.2026-S34', 'x'.repeat(50));
