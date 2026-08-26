@@ -33,7 +33,7 @@ import {
 import { ehChaveEstadoGrande } from '@/lib/cardapio/estado-grande-merge';
 import { inicializarOutbox, listarOutbox, removerOutbox, salvarOutbox } from '@/lib/cardapio/sync-outbox';
 import { adicionarEcoRecente, ehEcoProprio, serializarCanonico, type EcoRecente } from '@/lib/cardapio/sync-util';
-import { ehChaveConcorrente, mesclarDocumentoConcorrenteSeguro } from '@/lib/cardapio/sync-concorrente';
+import { ehChaveConcorrente, mesclarDocumentoConcorrenteSeguro, selecionarBaseConcorrente } from '@/lib/cardapio/sync-concorrente';
 import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
@@ -136,8 +136,9 @@ export function BootNuvem() {
     const pendentesConhecidos = new Set<string>(lerPendentesLegado());
     const revisoes = new Map<string, number>();
     const filasPorChave = new Map<string, Promise<void>>();
+    // Último ancestral COMUM/confirmado conhecido por chave.
+    // Edições locais pendentes não avançam esta base.
     const basesConcorrentes = new Map<string, unknown>();
-    const ultimoEnfileiradoPorChave = new Map<string, unknown>();
 
     const atualizarFilaVisual = () => {
       definirPendentesNuvem(pendentesConhecidos.size, 'boot');
@@ -184,9 +185,21 @@ export function BootNuvem() {
           try {
             if (ehChaveConcorrente(k)) {
               const remoto = await armazenamentoSupabase.ler<unknown>(k, null);
-              const temBase = baseHint !== undefined || basesConcorrentes.has(k);
-              const base = baseHint !== undefined ? baseHint : basesConcorrentes.get(k);
-              const mescla = mesclarDocumentoConcorrenteSeguro(temBase, base, valor, remoto);
+              // Se uma operação anterior desta mesma fila confirmou na nuvem,
+              // basesConcorrentes já avançou e vence o ancestral persistido.
+              // Se ela falhou/offline, a base confirmada continua antiga e o
+              // payload mais novo pode substituir a sequência local inteira.
+              const baseSelecionada = selecionarBaseConcorrente(
+                basesConcorrentes.has(k),
+                basesConcorrentes.get(k),
+                baseHint,
+              );
+              const mescla = mesclarDocumentoConcorrenteSeguro(
+                baseSelecionada.conhecida,
+                baseSelecionada.valor,
+                valor,
+                remoto,
+              );
               if (mescla.conflitos.length > 0) {
                 pendentesConhecidos.add(k);
                 atualizarFilaVisual();
@@ -222,7 +235,6 @@ export function BootNuvem() {
               pendentesConhecidos.delete(k);
 
               if (ehChaveConcorrente(k)) {
-                ultimoEnfileiradoPorChave.delete(k);
                 basesConcorrentes.set(k, valorEnviar);
                 const canon = serializarCanonico(valorEnviar);
                 try {
@@ -334,13 +346,13 @@ export function BootNuvem() {
           try {
             const valorJson = JSON.parse(valor);
             if (ehChaveConcorrente(k)) {
-              // Se ja existe uma edicao desta chave em voo, ela e o ancestral
-              // da proxima. Isso continua correto mesmo quando orig(setItem)
-              // falhou por quota e o localStorage ficou para tras.
-              const baseEnvio = ultimoEnfileiradoPorChave.has(k)
-                ? ultimoEnfileiradoPorChave.get(k)
+              // Persiste sempre o último ancestral COMUM conhecido, não a
+              // edição local anterior ainda não confirmada. Assim 10 -> 11
+              // -> 12 offline guarda base 10 + valor 12; ao reconectar contra
+              // remoto 10, envia 12 sem falso conflito.
+              const baseEnvio = basesConcorrentes.has(k)
+                ? basesConcorrentes.get(k)
                 : valorAnterior;
-              ultimoEnfileiradoPorChave.set(k, valorJson);
               subir(k, valorJson, baseEnvio);
             } else {
               subir(k, valorJson);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mesclarDocumentoConcorrente, mesclarDocumentoConcorrenteSeguro } from './sync-concorrente';
+import { mesclarDocumentoConcorrente, mesclarDocumentoConcorrenteSeguro, selecionarBaseConcorrente } from './sync-concorrente';
 
 describe('sync-concorrente', () => {
   it('preserva edicoes simultaneas em itens diferentes do mesmo mapa', () => {
@@ -71,5 +71,28 @@ describe('sync-concorrente', () => {
     );
     expect(r.conflitos).toEqual([]);
     expect(r.valor).toEqual({ arroz: 12 });
+  });
+
+  it('base atual confirmada vence a base persistida antiga da outbox', () => {
+    const b = selecionarBaseConcorrente(true, { arroz: 11 }, { arroz: 10 });
+    expect(b).toEqual({ conhecida: true, valor: { arroz: 11 } });
+    const r = mesclarDocumentoConcorrenteSeguro(b.conhecida, b.valor, { arroz: 12 }, { arroz: 11 });
+    expect(r.conflitos).toEqual([]);
+    expect(r.valor).toEqual({ arroz: 12 });
+  });
+
+  it('cold-start usa ancestral persistido para colapsar varias edicoes offline', () => {
+    const b = selecionarBaseConcorrente(false, undefined, { arroz: 10 });
+    expect(b).toEqual({ conhecida: true, valor: { arroz: 10 } });
+    const r = mesclarDocumentoConcorrenteSeguro(b.conhecida, b.valor, { arroz: 12 }, { arroz: 10 });
+    expect(r.conflitos).toEqual([]);
+    expect(r.valor).toEqual({ arroz: 12 });
+  });
+
+  it('continua fail-closed quando nao ha ancestral atual nem persistido', () => {
+    const b = selecionarBaseConcorrente(false, undefined, undefined);
+    expect(b.conhecida).toBe(false);
+    const r = mesclarDocumentoConcorrenteSeguro(b.conhecida, b.valor, { arroz: 12 }, { arroz: 10 });
+    expect(r.conflitos).toEqual(['(base-desconhecida)']);
   });
 });

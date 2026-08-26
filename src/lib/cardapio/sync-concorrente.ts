@@ -117,3 +117,21 @@ export function mesclarDocumentoConcorrenteSeguro(
   }
   return mesclarDocumentoConcorrente(base, local, remoto);
 }
+
+export interface BaseConcorrenteSelecionada {
+  conhecida: boolean;
+  valor: unknown;
+}
+
+/** A base confirmada da sessão vence a base persistida da outbox.
+ * A persistida só é usada após cold-start/reentrada, quando ainda não há
+ * ancestral comum em memória. */
+export function selecionarBaseConcorrente(
+  temBaseAtual: boolean,
+  baseAtual: unknown,
+  basePersistida: unknown,
+): BaseConcorrenteSelecionada {
+  if (temBaseAtual) return { conhecida: true, valor: baseAtual };
+  if (basePersistida !== undefined) return { conhecida: true, valor: basePersistida };
+  return { conhecida: false, valor: undefined };
+}
