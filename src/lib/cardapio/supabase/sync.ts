@@ -1,44 +1,52 @@
 'use client';
 
-/* =====================================================================
-   Sincronização localStorage ⇄ Supabase (tabela KV tata_estado). Tudo é
-   opt-in: enquanto o Supabase estiver desligado, o hook reporta indisponível
-   e nada acontece. Quando ligado, dá para "enviar" (subir o estado local) e
-   "baixar" (trazer o remoto para o dispositivo). É a base para, num próximo
-   passo, fazer o app ler/gravar direto no remoto.
-   ===================================================================== */
-
 import { useCallback, useEffect, useState } from 'react';
+import {
+  aplicarEstadoGrandeDaNuvem,
+  inicializarEstadoGrandeLocal,
+  liberarEstadoGrandeParaNuvem,
+  reenviarEstadoGrandePendente,
+} from '../estado-grande';
+import { ehChaveEstadoGrande } from '../estado-grande-merge';
 import { supabaseHabilitado } from './config';
 import { armazenamentoLocal, armazenamentoSupabase } from './armazenamento';
 
-/** Sobe todas as chaves do localStorage para o Supabase. */
+/** Sobe o estado local genérico. Os estados grandes v2 têm fila própria e
+ * nunca voltam a ser materializados como blobs no localStorage. */
 export async function enviarTudo(): Promise<number> {
   if (!supabaseHabilitado()) return 0;
   const chaves = await armazenamentoLocal.listarChaves();
   let n = 0;
   for (const chave of chaves) {
+    if (ehChaveEstadoGrande(chave)) continue;
     const valor = await armazenamentoLocal.ler<unknown>(chave, null);
     if (valor !== null) {
       await armazenamentoSupabase.gravar(chave, valor);
       n++;
     }
   }
+  await reenviarEstadoGrandePendente();
   return n;
 }
 
-/** Traz todas as chaves do Supabase para o localStorage deste dispositivo. */
+/** Traz o remoto. Estados grandes são reconciliados em IndexedDB/memória,
+ * não no localStorage — inclusive quando o usuário aperta o botão manual. */
 export async function baixarTudo(): Promise<number> {
   if (!supabaseHabilitado()) return 0;
+  await inicializarEstadoGrandeLocal();
   const chaves = await armazenamentoSupabase.listarChaves();
   let n = 0;
   for (const chave of chaves) {
     const valor = await armazenamentoSupabase.ler<unknown>(chave, null);
-    if (valor !== null) {
+    if (valor === null) continue;
+    if (ehChaveEstadoGrande(chave)) {
+      await aplicarEstadoGrandeDaNuvem(chave, valor);
+    } else {
       await armazenamentoLocal.gravar(chave, valor);
-      n++;
     }
+    n++;
   }
+  await liberarEstadoGrandeParaNuvem(chaves);
   return n;
 }
 
@@ -51,7 +59,6 @@ export interface EstadoSync {
   baixar: () => Promise<void>;
 }
 
-/** Hook de sincronização — no-op seguro quando o Supabase está desligado. */
 export function useSincronizacao(): EstadoSync {
   const [disponivel, setDisponivel] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);

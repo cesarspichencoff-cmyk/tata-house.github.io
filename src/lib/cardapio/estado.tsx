@@ -9,6 +9,17 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
 import { definirArmazenamentoLocalCheio } from './aviso-armazenamento';
 import { gravarComRecuperacaoDeQuota } from './armazenamento-local-seguro';
+import {
+  assinarAuditoria,
+  assinarHistoricoPrecos,
+  inicializarEstadoGrandeLocal,
+  limparAuditoriaPersistente,
+  mesclarSeedHistoricoPersistente,
+  registrarAuditoriaPersistente,
+  registrarPontoPrecoPersistente,
+  snapshotAuditoria,
+  snapshotHistoricoPrecos,
+} from './estado-grande';
 import { registrarVersao } from './historico-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
@@ -147,18 +158,12 @@ function useReleituraExterna(chave: string, recarregar: () => void) {
    relevantes aqui; a aba de Auditoria escuta via assinatura simples.
    ===================================================================== */
 
-let cacheAuditoria: RegistroAuditoria[] | null = null;
-const ouvintesAuditoria = new Set<() => void>();
-
-function carregarAuditoria(): RegistroAuditoria[] {
-  if (cacheAuditoria === null) cacheAuditoria = lerLocal<RegistroAuditoria[]>('auditoria', []);
-  return cacheAuditoria;
-}
-
 /** Papel ativo no momento (mantido em sincronia por usePapel) p/ carimbar logs. */
 let papelAtual: Papel = 'gestor';
 
-export function registrarAuditoria(reg: Omit<RegistroAuditoria, 'em' | 'papel'> & { em?: string; papel?: Papel }) {
+export function registrarAuditoria(
+  reg: Omit<RegistroAuditoria, 'em' | 'papel'> & { em?: string; papel?: Papel },
+) {
   const completo: RegistroAuditoria = {
     em: reg.em ?? new Date().toISOString(),
     papel: reg.papel ?? papelAtual,
@@ -167,35 +172,27 @@ export function registrarAuditoria(reg: Omit<RegistroAuditoria, 'em' | 'papel'> 
     de: reg.de,
     para: reg.para,
     semana: reg.semana,
+    contexto: reg.contexto,
   };
-  const lista = [completo, ...carregarAuditoria()].slice(0, 800);
-  cacheAuditoria = lista;
-  gravarLocal('auditoria', lista);
-  ouvintesAuditoria.forEach((f) => f());
+  registrarAuditoriaPersistente(completo);
 }
 
 export function useAuditoria() {
-  const [, forcar] = useState(0);
+  const [registros, setRegistros] = useState<RegistroAuditoria[]>(() => snapshotAuditoria());
+
   useEffect(() => {
-    const f = () => forcar((x) => x + 1);
-    ouvintesAuditoria.add(f);
-    f(); // garante leitura no cliente
-    return () => {
-      ouvintesAuditoria.delete(f);
-    };
+    const atualizar = () => setRegistros(snapshotAuditoria());
+    const parar = assinarAuditoria(atualizar);
+    void inicializarEstadoGrandeLocal().then(atualizar);
+    atualizar();
+    return parar;
   }, []);
-  // mudança vinda da nuvem/outra aba: invalida o cache e re-renderiza
-  const recarregar = useCallback(() => {
-    cacheAuditoria = null;
-    forcar((x) => x + 1);
-  }, []);
-  useReleituraExterna('auditoria', recarregar);
+
   const limpar = useCallback(() => {
-    cacheAuditoria = [];
-    gravarLocal('auditoria', []);
-    ouvintesAuditoria.forEach((f) => f());
+    limparAuditoriaPersistente();
   }, []);
-  return { registros: carregarAuditoria(), limpar };
+
+  return { registros, limpar };
 }
 
 function ddmm(d: Date): string {
@@ -366,12 +363,9 @@ export function usePrecos() {
 
       // só registra quando o valor realmente mudou
       if (valor !== null && valor > 0 && valor !== anterior) {
-        // histórico para o radar de preços (Módulo 5)
-        const hist = lerLocal<HistoricoPrecos>('historicoPrecos', {});
-        const serie = hist[itemNorm] ?? [];
-        serie.push({ valor, em: new Date().toISOString() });
-        hist[itemNorm] = serie.slice(-40);
-        gravarLocal('historicoPrecos', hist);
+        // Histórico grande: memória + IndexedDB, com envio v2 agrupado para
+        // a nuvem. Não regrava mais o blob inteiro no localStorage a cada item.
+        registrarPontoPrecoPersistente(itemNorm, valor, new Date().toISOString());
         // trilha de auditoria (Módulo 9)
         registrarAuditoria({
           acao: 'alterou preço',
@@ -387,38 +381,31 @@ export function usePrecos() {
   return { precos, definirPreco };
 }
 
-/** Série temporal de preços por item (alimenta o radar). */
+/** Série temporal de preços por item (alimenta o radar).
+ * O snapshot vive em memória/IndexedDB e converge com a nuvem em v2. */
 export function useHistoricoPrecos() {
-  const [historico, setHistorico] = useState<HistoricoPrecos>({});
-  const recarregar = useCallback(() => setHistorico(lerLocal('historicoPrecos', {})), []);
-  useEffect(() => { recarregar(); }, [recarregar]);
-  useReleituraExterna('historicoPrecos', recarregar);
+  const [historico, setHistorico] = useState<HistoricoPrecos>(() => snapshotHistoricoPrecos());
+
+  useEffect(() => {
+    const atualizar = () => setHistorico(snapshotHistoricoPrecos());
+    const parar = assinarHistoricoPrecos(atualizar);
+    void inicializarEstadoGrandeLocal().then(atualizar);
+    atualizar();
+    return parar;
+  }, []);
+
   return historico;
 }
 
 /**
- * Semente única do histórico de compras jan–mai/2026.
- * Roda apenas uma vez por dispositivo (flag 'historicoSeedV1').
- * Não sobrescreve entradas manuais: só adiciona pontos que ainda não existem.
+ * A planilha histórica continua sendo semente idempotente. A união v2
+ * deduplica por data+valor e preserva todo o legado — sem flag por aparelho.
  */
 export function useSeedHistoricoPlanilha() {
   useEffect(() => {
-    if (lerLocal('historicoSeedV1', false)) return;
-    const seed = historicoPlanilhaJson as HistoricoPrecos;
-    const atual = lerLocal<HistoricoPrecos>('historicoPrecos', {});
-    const merged: HistoricoPrecos = { ...atual };
-    for (const [item, pontos] of Object.entries(seed)) {
-      if (!merged[item]) {
-        merged[item] = pontos;
-      } else {
-        // Append only points not already in the serie (dedupe by em)
-        const emsExistentes = new Set(merged[item].map((p) => p.em));
-        const novos = pontos.filter((p) => !emsExistentes.has(p.em));
-        if (novos.length) merged[item] = [...merged[item], ...novos].sort((a, b) => a.em.localeCompare(b.em));
-      }
-    }
-    gravarLocal('historicoPrecos', merged);
-    gravarLocal('historicoSeedV1', true);
+    void inicializarEstadoGrandeLocal().then(() =>
+      mesclarSeedHistoricoPersistente(historicoPlanilhaJson as HistoricoPrecos),
+    );
   }, []);
 }
 
@@ -457,7 +444,22 @@ export function useFornecedores() {
 
   const recarregar = useCallback(() => {
     // MAPA_FORNECEDORES_SEED como base; mapeamentos do usuário têm prioridade.
-    const local = lerLocal<Record<string, string>>('fornecedores', {});
+    // Versões antigas reutilizavam esta MESMA chave para uma lista de nomes
+    // da tela de cotação. Se vier array, migra a lista para uma chave própria
+    // e não a trata como mapa item→fornecedor.
+    const bruto = lerLocal<unknown>('fornecedores', {});
+    let local: Record<string, string> = {};
+    if (Array.isArray(bruto)) {
+      try {
+        const chaveLista = PREFIXO + 'cotacao.fornecedoresLista';
+        if (localStorage.getItem(chaveLista) == null) {
+          localStorage.setItem(chaveLista, JSON.stringify(bruto));
+        }
+      } catch { /* best-effort */ }
+      gravarLocal('fornecedores', {});
+    } else if (bruto && typeof bruto === 'object') {
+      local = bruto as Record<string, string>;
+    }
     const merge = { ...MAPA_FORNECEDORES_SEED, ...local };
     // Remove remetentes internos (Erika etc.) que possam ter sido salvos antes.
     for (const k of Object.keys(merge)) if (ehRemetenteInterno(merge[k])) delete merge[k];

@@ -1,26 +1,29 @@
 'use client';
 
-/* =====================================================================
-   Abstração de armazenamento (chave → valor JSON). Hoje o app usa o
-   localStorage; esta camada dá um caminho único para, no futuro, ler/gravar
-   no Supabase sem reescrever as telas. A migração espelha exatamente as
-   chaves do localStorage numa tabela KV (tata_estado), o jeito mais fiel e
-   de menor risco de transpor o protótipo.
-   ===================================================================== */
-
+import { gravarComRecuperacaoDeQuota } from '../armazenamento-local-seguro';
+import { definirArmazenamentoLocalCheio } from '../aviso-armazenamento';
+import {
+  CHAVE_AUDITORIA_V2,
+  CHAVE_HISTORICO_V2,
+  ehAuditoriaV2,
+  ehHistoricoV2,
+  mesclarAuditoria,
+  mesclarHistorico,
+} from '../estado-grande-merge';
+import {
+  gravarMescladoComCas,
+  type RegistroVersionado,
+  type VersaoRemota,
+} from '../estado-grande-cas';
 import { ESPACO_DADOS, PREFIXO_LOCAL, supabaseHabilitado } from './config';
 import { getSupabase } from './client';
-import { definirArmazenamentoLocalCheio } from '../aviso-armazenamento';
 
 export interface Armazenamento {
   ler<T>(chave: string, padrao: T): Promise<T>;
   gravar(chave: string, valor: unknown): Promise<void>;
   remover(chave: string): Promise<void>;
-  /** Todas as chaves (sem o prefixo) deste espaço. */
   listarChaves(): Promise<string[]>;
 }
-
-/* ----------------------------- localStorage ----------------------------- */
 
 export const armazenamentoLocal: Armazenamento = {
   async ler<T>(chave: string, padrao: T): Promise<T> {
@@ -32,16 +35,17 @@ export const armazenamentoLocal: Armazenamento = {
       return padrao;
     }
   },
+
   async gravar(chave: string, valor: unknown): Promise<void> {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(PREFIXO_LOCAL + chave, JSON.stringify(valor));
-      definirArmazenamentoLocalCheio(false);
-    } catch {
-      /* armazenamento indisponível (cheio) — aviso global cobre isso */
-      definirArmazenamentoLocalCheio(true);
-    }
+    const resultado = gravarComRecuperacaoDeQuota(
+      localStorage,
+      PREFIXO_LOCAL + chave,
+      JSON.stringify(valor),
+    );
+    definirArmazenamentoLocalCheio(!resultado.ok);
   },
+
   async remover(chave: string): Promise<void> {
     if (typeof window === 'undefined') return;
     try {
@@ -50,6 +54,7 @@ export const armazenamentoLocal: Armazenamento = {
       /* ignore */
     }
   },
+
   async listarChaves(): Promise<string[]> {
     if (typeof window === 'undefined') return [];
     const out: string[] = [];
@@ -61,44 +66,160 @@ export const armazenamentoLocal: Armazenamento = {
   },
 };
 
-/* ------------------------------ Supabase KV ----------------------------- */
-
 const TABELA = 'tata_estado';
 
-/* IMPORTANTE: todas as chamadas abaixo usam .throwOnError(). O cliente do
-   Supabase NÃO lança exceção quando a política de segurança (RLS) nega o
-   acesso ou a query falha no Postgres — ele resolve normalmente com
-   `{ data: null, error: {...} }`. Sem `.throwOnError()`, um bloqueio de RLS
-   (ou uma tabela renomeada, ou uma chave revogada) passava batido pelo
-   `catch`/`res.data ?? []` como se fosse "sucesso" ou "nuvem vazia" — o app
-   reportava status 'online' e ninguém via que nada estava realmente sendo
-   gravado/lido na nuvem. Agora esses erros propagam de verdade: o BootNuvem
-   marca a chave como pendente e mostra 'erro' no indicador, em vez de mentir
-   que sincronizou. */
+interface ConsultaCas extends PromiseLike<{ data: unknown; error: unknown }> {
+  select(cols?: string): ConsultaCas;
+  insert(linhas: unknown): ConsultaCas;
+  update(linhas: unknown): ConsultaCas;
+  eq(col: string, val: unknown): ConsultaCas;
+  is(col: string, val: unknown): ConsultaCas;
+  throwOnError(): ConsultaCas;
+}
+
+function marcadorNovo(anterior: string | null): string {
+  const agora = Date.now();
+  const candidato = new Date(agora).toISOString();
+  return candidato === anterior ? new Date(agora + 1).toISOString() : candidato;
+}
+
+async function lerEstadoGrandeVersionado(
+  chave: string,
+): Promise<RegistroVersionado<unknown>> {
+  const sb = await getSupabase();
+  if (!sb) throw new Error('Cliente Supabase indisponível');
+
+  const consulta = sb.from(TABELA) as unknown as ConsultaCas;
+  const res = (await consulta
+    .select('valor, atualizado_em')
+    .eq('espaco', ESPACO_DADOS)
+    .eq('chave', chave)
+    .throwOnError()) as {
+    data: { valor: unknown; atualizado_em: string | null }[] | null;
+  };
+
+  const linha = res.data?.[0];
+  return linha
+    ? {
+        existe: true,
+        valor: linha.valor,
+        atualizadoEm: linha.atualizado_em ?? null,
+      }
+    : { existe: false, valor: null, atualizadoEm: null };
+}
+
+async function tentarGravarEstadoGrande(
+  chave: string,
+  valor: unknown,
+  versaoEsperada: VersaoRemota,
+): Promise<boolean> {
+  const sb = await getSupabase();
+  if (!sb) throw new Error('Cliente Supabase indisponível');
+
+  const atualizadoEm = marcadorNovo(versaoEsperada.atualizadoEm);
+  const linha = {
+    espaco: ESPACO_DADOS,
+    chave,
+    valor,
+    atualizado_em: atualizadoEm,
+  };
+
+  if (!versaoEsperada.existe) {
+    try {
+      const consulta = sb.from(TABELA) as unknown as ConsultaCas;
+      const res = (await consulta
+        .insert(linha)
+        .select('atualizado_em')
+        .throwOnError()) as { data: { atualizado_em: string }[] | null };
+      return (res.data?.length ?? 0) > 0;
+    } catch (erro) {
+      // Outro cliente pode ter criado a chave entre a leitura e o INSERT.
+      // Só tratamos como corrida quando a releitura confirma a linha; erro de
+      // rede/permissão continua subindo e mantém a alteração pendente.
+      const atual = await lerEstadoGrandeVersionado(chave);
+      if (atual.existe) return false;
+      throw erro;
+    }
+  }
+
+  const tabela = sb.from(TABELA) as unknown as ConsultaCas;
+  let consulta = tabela
+    .update({ valor, atualizado_em: atualizadoEm })
+    .eq('espaco', ESPACO_DADOS)
+    .eq('chave', chave);
+
+  consulta =
+    versaoEsperada.atualizadoEm === null
+      ? consulta.is('atualizado_em', null)
+      : consulta.eq('atualizado_em', versaoEsperada.atualizadoEm);
+
+  const res = (await consulta
+    .select('atualizado_em')
+    .throwOnError()) as { data: { atualizado_em: string }[] | null };
+
+  // Zero linhas = outro cliente mudou a versão depois da nossa leitura.
+  return (res.data?.length ?? 0) === 1;
+}
+
+async function gravarEstadoGrandeComCas(chave: string, valor: unknown): Promise<void> {
+  if (chave === CHAVE_AUDITORIA_V2) {
+    if (!ehAuditoriaV2(valor)) {
+      throw new Error('Auditoria v2 local inválida; escrita bloqueada');
+    }
+    await gravarMescladoComCas(
+      valor,
+      () => lerEstadoGrandeVersionado(chave),
+      (combinado, versao) => tentarGravarEstadoGrande(chave, combinado, versao),
+      ehAuditoriaV2,
+      mesclarAuditoria,
+    );
+    return;
+  }
+
+  if (chave === CHAVE_HISTORICO_V2) {
+    if (!ehHistoricoV2(valor)) {
+      throw new Error('Histórico v2 local inválido; escrita bloqueada');
+    }
+    await gravarMescladoComCas(
+      valor,
+      () => lerEstadoGrandeVersionado(chave),
+      (combinado, versao) => tentarGravarEstadoGrande(chave, combinado, versao),
+      ehHistoricoV2,
+      mesclarHistorico,
+    );
+    return;
+  }
+
+  throw new Error(`Chave de estado grande sem política CAS: ${chave}`);
+}
 
 export const armazenamentoSupabase: Armazenamento = {
   async ler<T>(chave: string, padrao: T): Promise<T> {
     const sb = await getSupabase();
     if (!sb) return padrao;
-    try {
-      const res = (await sb
-        .from(TABELA)
-        .select('valor')
-        .eq('espaco', ESPACO_DADOS)
-        .eq('chave', chave)
-        .throwOnError()) as { data: { valor: T }[] | null };
-      const linha = res.data?.[0];
-      return linha ? linha.valor : padrao;
-    } catch {
-      return padrao;
-    }
+
+    // IMPORTANTE: erro de leitura NÃO é ausência de chave. A exceção sobe
+    // para o BootNuvem abortar a reconciliação e mostrar falha real.
+    const res = (await sb
+      .from(TABELA)
+      .select('valor')
+      .eq('espaco', ESPACO_DADOS)
+      .eq('chave', chave)
+      .throwOnError()) as { data: { valor: T }[] | null };
+
+    const linha = res.data?.[0];
+    return linha ? linha.valor : padrao;
   },
+
   async gravar(chave: string, valor: unknown): Promise<void> {
     const sb = await getSupabase();
-    if (!sb) return;
-    // Sem catch: erro precisa propagar para quem chama (BootNuvem.subir)
-    // marcar a chave como pendente e tentar de novo — se engolirmos aqui,
-    // a gravação "falha em silêncio" e nunca mais é reenviada.
+    if (!sb) throw new Error('Cliente Supabase indisponível');
+
+    if (chave === CHAVE_AUDITORIA_V2 || chave === CHAVE_HISTORICO_V2) {
+      await gravarEstadoGrandeComCas(chave, valor);
+      return;
+    }
+
     await sb
       .from(TABELA)
       .upsert(
@@ -107,21 +228,16 @@ export const armazenamentoSupabase: Armazenamento = {
       )
       .throwOnError();
   },
+
   async remover(chave: string): Promise<void> {
     const sb = await getSupabase();
-    if (!sb) return;
+    if (!sb) throw new Error('Cliente Supabase indisponível');
     await sb.from(TABELA).delete().eq('espaco', ESPACO_DADOS).eq('chave', chave).throwOnError();
   },
+
   async listarChaves(): Promise<string[]> {
     const sb = await getSupabase();
-    if (!sb) return [];
-    // Não engolir erro aqui devolvendo [] — quem chama (BootNuvem) usa esta
-    // lista para decidir quais chaves locais são "lacunas" seguras de
-    // empurrar sem merge. Uma falha disfarçada de "nuvem vazia" faria o app
-    // achar que TODAS as chaves locais são novas e empurrá-las por cima do
-    // que já existe na nuvem, sem conflito nenhum — foi exatamente assim que
-    // o cardápio da semana foi sobrescrito em 2026-07-14. Deixa o erro
-    // propagar para o chamador abortar a sincronização em vez de arriscar.
+    if (!sb) throw new Error('Cliente Supabase indisponível');
     const res = (await sb
       .from(TABELA)
       .select('chave')
@@ -131,7 +247,6 @@ export const armazenamentoSupabase: Armazenamento = {
   },
 };
 
-/** Armazenamento ativo conforme a configuração (Supabase se ligado). */
 export function armazenamentoAtivo(): Armazenamento {
   return supabaseHabilitado() ? armazenamentoSupabase : armazenamentoLocal;
 }
