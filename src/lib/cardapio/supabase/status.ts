@@ -27,16 +27,23 @@ const ouvintes = new Set<() => void>();
 /** Reporta um novo status (chamado pelo BootNuvem). `ultima` marca o último
    instante em que ficou efetivamente sincronizado ('online'). */
 export function definirStatusNuvem(status: StatusNuvem) {
-  const ultima = status === 'online' ? Date.now() : estado.ultima;
-  const erroDesde = status === 'erro' ? (estado.erroDesde ?? Date.now()) : null;
-  estado = { ...estado, status, ultima, erroDesde };
+  // Invariante global: "online" significa ZERO alterações sem confirmação.
+  // Mesmo que algum chamador futuro erre, o estado compartilhado não permite
+  // que o cabeçalho mostre "Sincronizado" enquanto houver pendências.
+  const efetivo: StatusNuvem =
+    status === 'online' && estado.pendentes > 0 ? 'sincronizando' : status;
+  const ultima = efetivo === 'online' ? Date.now() : estado.ultima;
+  const erroDesde = efetivo === 'erro' ? (estado.erroDesde ?? Date.now()) : null;
+  estado = { ...estado, status: efetivo, ultima, erroDesde };
   ouvintes.forEach((f) => f());
 }
 
 /** Reporta quantas chaves locais ainda não confirmaram gravação na nuvem
    (chamado pelo BootNuvem sempre que a fila de pendentes muda). */
 export function definirPendentesNuvem(pendentes: number) {
-  estado = { ...estado, pendentes };
+  const status: StatusNuvem =
+    pendentes > 0 && estado.status === 'online' ? 'sincronizando' : estado.status;
+  estado = { ...estado, pendentes, status };
   ouvintes.forEach((f) => f());
 }
 

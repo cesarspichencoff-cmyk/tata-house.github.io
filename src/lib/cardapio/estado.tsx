@@ -1,13 +1,13 @@
 'use client';
 
 /* =====================================================================
-   Estado do Cardápio da equipe — persistido em localStorage (protótipo).
+   Estado do Cardápio da equipe — Supabase compartilhado + cache local.
    Cada semana é um documento independente; preços são globais.
    ===================================================================== */
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
-import { definirArmazenamentoLocalCheio } from './aviso-armazenamento';
+import { gravarRawCache, lerRawCache, listarChavesCache, temRawCache } from './cache-local';
 import { registrarVersao } from './historico-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
@@ -77,7 +77,7 @@ export function semanaVazia(): EstadoSemana {
 function lerLocal<T>(chave: string, padrao: T): T {
   if (typeof window === 'undefined') return padrao;
   try {
-    const raw = localStorage.getItem(PREFIXO + chave);
+    const raw = lerRawCache(PREFIXO + chave);
     return raw ? (JSON.parse(raw) as T) : padrao;
   } catch {
     return padrao;
@@ -85,15 +85,11 @@ function lerLocal<T>(chave: string, padrao: T): T {
 }
 
 function gravarLocal(chave: string, valor: unknown) {
-  try {
-    localStorage.setItem(PREFIXO + chave, JSON.stringify(valor));
-    definirArmazenamentoLocalCheio(false);
-  } catch {
-    // Armazenamento cheio/indisponível: a mudança fica só em memória (React
-    // state) e some no próximo reload. Isso não pode passar em silêncio —
-    // é o cenário "encheu o celular da pessoa" — por isso o aviso global.
-    definirArmazenamentoLocalCheio(true);
-  }
+  if (typeof window === 'undefined') return;
+  // A sombra é atualizada antes da tentativa física. Se o localStorage estiver
+  // cheio, a edição continua viva nesta sessão e o BootNuvem ainda consegue
+  // enviá-la ao Supabase.
+  gravarRawCache(PREFIXO + chave, JSON.stringify(valor));
 }
 
 /* =====================================================================
@@ -263,10 +259,8 @@ export function semanasComConteudo(): string[] {
   const prefixo = PREFIXO + 'semana.';
   const ids: string[] = [];
   try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k || !k.startsWith(prefixo)) continue;
-      const raw = localStorage.getItem(k);
+    for (const k of listarChavesCache(prefixo)) {
+      const raw = lerRawCache(k);
       if (raw && /"principal":"[^"]+"/.test(raw)) ids.push(k.slice(prefixo.length));
     }
   } catch {
@@ -305,7 +299,7 @@ export function useSemana(semanaId: string) {
     // de mostrar isso como definitivo — senão um cardápio real "some" por
     // alguns instantes toda vez que alguém abre o app num aparelho/sessão novos.
     const jaTemAlgoLocal =
-      typeof window !== 'undefined' && localStorage.getItem(PREFIXO + 'semana.' + semanaId) != null;
+      typeof window !== 'undefined' && temRawCache(PREFIXO + 'semana.' + semanaId);
 
     if (!supabaseHabilitado() || jaTemAlgoLocal) {
       setPronto(true);

@@ -10,7 +10,7 @@
 
 import { ESPACO_DADOS, PREFIXO_LOCAL, supabaseHabilitado } from './config';
 import { getSupabase } from './client';
-import { definirArmazenamentoLocalCheio } from '../aviso-armazenamento';
+import { gravarRawCache, lerRawCache, listarChavesCache, removerRawCache } from '../cache-local';
 
 export interface Armazenamento {
   ler<T>(chave: string, padrao: T): Promise<T>;
@@ -26,7 +26,7 @@ export const armazenamentoLocal: Armazenamento = {
   async ler<T>(chave: string, padrao: T): Promise<T> {
     if (typeof window === 'undefined') return padrao;
     try {
-      const raw = localStorage.getItem(PREFIXO_LOCAL + chave);
+      const raw = lerRawCache(PREFIXO_LOCAL + chave);
       return raw ? (JSON.parse(raw) as T) : padrao;
     } catch {
       return padrao;
@@ -34,30 +34,15 @@ export const armazenamentoLocal: Armazenamento = {
   },
   async gravar(chave: string, valor: unknown): Promise<void> {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(PREFIXO_LOCAL + chave, JSON.stringify(valor));
-      definirArmazenamentoLocalCheio(false);
-    } catch {
-      /* armazenamento indisponível (cheio) — aviso global cobre isso */
-      definirArmazenamentoLocalCheio(true);
-    }
+    gravarRawCache(PREFIXO_LOCAL + chave, JSON.stringify(valor));
   },
   async remover(chave: string): Promise<void> {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.removeItem(PREFIXO_LOCAL + chave);
-    } catch {
-      /* ignore */
-    }
+    removerRawCache(PREFIXO_LOCAL + chave);
   },
   async listarChaves(): Promise<string[]> {
     if (typeof window === 'undefined') return [];
-    const out: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(PREFIXO_LOCAL)) out.push(k.slice(PREFIXO_LOCAL.length));
-    }
-    return out;
+    return listarChavesCache(PREFIXO_LOCAL).map((k) => k.slice(PREFIXO_LOCAL.length));
   },
 };
 
@@ -79,23 +64,22 @@ const TABELA = 'tata_estado';
 export const armazenamentoSupabase: Armazenamento = {
   async ler<T>(chave: string, padrao: T): Promise<T> {
     const sb = await getSupabase();
-    if (!sb) return padrao;
-    try {
-      const res = (await sb
-        .from(TABELA)
-        .select('valor')
-        .eq('espaco', ESPACO_DADOS)
-        .eq('chave', chave)
-        .throwOnError()) as { data: { valor: T }[] | null };
-      const linha = res.data?.[0];
-      return linha ? linha.valor : padrao;
-    } catch {
-      return padrao;
-    }
+    if (!sb) throw new Error('Cliente Supabase indisponível');
+    // AUSÊNCIA de linha devolve o padrão; ERRO de consulta precisa propagar.
+    // Essa diferença é crítica: tratar falha de rede/RLS como "não existe"
+    // faria o boot acreditar que uma chave local velha é uma lacuna segura.
+    const res = (await sb
+      .from(TABELA)
+      .select('valor')
+      .eq('espaco', ESPACO_DADOS)
+      .eq('chave', chave)
+      .throwOnError()) as { data: { valor: T }[] | null };
+    const linha = res.data?.[0];
+    return linha ? linha.valor : padrao;
   },
   async gravar(chave: string, valor: unknown): Promise<void> {
     const sb = await getSupabase();
-    if (!sb) return;
+    if (!sb) throw new Error('Cliente Supabase indisponível');
     // Sem catch: erro precisa propagar para quem chama (BootNuvem.subir)
     // marcar a chave como pendente e tentar de novo — se engolirmos aqui,
     // a gravação "falha em silêncio" e nunca mais é reenviada.
@@ -109,12 +93,12 @@ export const armazenamentoSupabase: Armazenamento = {
   },
   async remover(chave: string): Promise<void> {
     const sb = await getSupabase();
-    if (!sb) return;
+    if (!sb) throw new Error('Cliente Supabase indisponível');
     await sb.from(TABELA).delete().eq('espaco', ESPACO_DADOS).eq('chave', chave).throwOnError();
   },
   async listarChaves(): Promise<string[]> {
     const sb = await getSupabase();
-    if (!sb) return [];
+    if (!sb) throw new Error('Cliente Supabase indisponível');
     // Não engolir erro aqui devolvendo [] — quem chama (BootNuvem) usa esta
     // lista para decidir quais chaves locais são "lacunas" seguras de
     // empurrar sem merge. Uma falha disfarçada de "nuvem vazia" faria o app
