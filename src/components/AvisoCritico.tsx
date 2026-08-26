@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { useStatusNuvem } from '@/lib/cardapio/supabase';
+import type { StatusNuvem } from '@/lib/cardapio/supabase/status';
 
 const LIMIAR_ERRO_MS = 15_000;
 
@@ -26,6 +27,34 @@ function useErroSustentado(erroDesde: number | null): boolean {
   return passouLimiar;
 }
 
+export function mensagemArmazenamentoCheio(status: StatusNuvem, pendentes: number): string {
+  const fila =
+    pendentes > 0
+      ? ` Há ${pendentes} alteração(ões) ainda aguardando confirmação.`
+      : '';
+
+  if (status === 'erro') {
+    return (
+      'O armazenamento local deste aparelho atingiu o limite e a nuvem também está com falha.' +
+      fila +
+      ' Estados grandes tentam usar o IndexedDB, mas a última alteração não está garantida até a nuvem confirmar. Evite fechar esta tela.'
+    );
+  }
+
+  if (status === 'desligado') {
+    return (
+      'O armazenamento local deste aparelho atingiu o limite e este aparelho não está sincronizando.' +
+      ' Estados grandes tentam usar o IndexedDB, mas a última alteração pode existir apenas nesta tela. Evite fechar antes de recuperar a sincronização.'
+    );
+  }
+
+  return (
+    'O armazenamento local deste aparelho atingiu o limite.' +
+    fila +
+    ' Estados grandes tentam usar o IndexedDB, mas uma alteração só deve ser considerada salva depois da confirmação da nuvem. Evite fechar esta tela enquanto houver pendências.'
+  );
+}
+
 export function AvisoCritico() {
   const cheio = useArmazenamentoLocalCheio();
   const { status, erroDesde, pendentes } = useStatusNuvem();
@@ -34,8 +63,7 @@ export function AvisoCritico() {
   if (cheio) {
     return (
       <Banner cor="bg-perigo">
-        O cache local deste aparelho atingiu o limite. Evite fechar esta tela até a sincronização
-        terminar; o TATÁ House está preservando os estados grandes fora desse cache.
+        {mensagemArmazenamentoCheio(status, pendentes)}
       </Banner>
     );
   }
