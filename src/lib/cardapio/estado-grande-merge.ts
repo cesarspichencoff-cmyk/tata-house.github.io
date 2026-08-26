@@ -74,6 +74,18 @@ function assinaturaAuditoria(r: RegistroAuditoria): string {
   });
 }
 
+function compararTextoDesc(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? 1 : -1;
+}
+
+function compararAuditoria(x: RegistroAuditoria, y: RegistroAuditoria): number {
+  const porTempo = compararTextoDesc(x.em, y.em);
+  if (porTempo !== 0) return porTempo;
+
+  return compararTextoDesc(assinaturaAuditoria(x), assinaturaAuditoria(y));
+}
+
 export function mesclarAuditoria(a: AuditoriaV2, b: AuditoriaV2): AuditoriaV2 {
   const limpoAte = maisNovo(a.limpoAte, b.limpoAte);
   const porId = new Map<string, RegistroAuditoria>();
@@ -85,7 +97,7 @@ export function mesclarAuditoria(a: AuditoriaV2, b: AuditoriaV2): AuditoriaV2 {
   }
 
   const registros = Array.from(porId.values())
-    .sort((x, y) => y.em.localeCompare(x.em))
+    .sort(compararAuditoria)
     .slice(0, 800);
 
   return { versao: 2, limpoAte, registros };

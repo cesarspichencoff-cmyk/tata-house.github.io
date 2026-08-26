@@ -7,6 +7,7 @@ import {
   mesclarAuditoria,
   mesclarHistorico,
 } from './estado-grande-merge';
+import { serializarCanonico } from './sync-util';
 import type { RegistroAuditoria } from './tipos';
 
 const reg = (em: string, acao: string): RegistroAuditoria => ({
@@ -32,6 +33,27 @@ describe('estado-grande-merge', () => {
     const ba = mesclarAuditoria(b, a);
     expect(ab).toEqual(ba);
     expect(ab.registros.map((r) => r.acao)).toEqual(['B', 'A']);
+  });
+
+  it('converge com entrada oposta quando eventos distintos empatam no timestamp real do blocker', () => {
+    const mesmoEm = '2026-08-26T14:59:49.080Z';
+    const eventoA = reg(mesmoEm, 'CAS-A-AUDIT-SIM-20260826');
+    const eventoB = reg(mesmoEm, 'CAS-B-AUDIT-SIM-20260826');
+    const a = auditoriaDeLegado([eventoA]);
+    const b = auditoriaDeLegado([eventoB]);
+
+    const ab = mesclarAuditoria(a, b);
+    const ba = mesclarAuditoria(b, a);
+    const m = ab;
+
+    expect(ab).toEqual(ba);
+    expect(serializarCanonico(ab)).toBe(serializarCanonico(ba));
+    expect(ab.registros.map((r) => r.alvo).sort()).toEqual([
+      'CAS-A-AUDIT-SIM-20260826',
+      'CAS-B-AUDIT-SIM-20260826',
+    ]);
+    expect(mesclarAuditoria(m, m)).toEqual(m);
+    expect(mesclarAuditoria(ab, ba)).toEqual(m);
   });
 
   it('tombstone de limpar impede auditoria antiga de ressuscitar', () => {
