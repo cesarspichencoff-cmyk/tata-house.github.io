@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabaseHabilitado, aguardarBootNuvem } from './supabase';
 import { definirArmazenamentoLocalCheio } from './aviso-armazenamento';
+import { gravarComRecuperacaoDeQuota } from './armazenamento-local-seguro';
 import { registrarVersao } from './historico-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
@@ -86,12 +87,14 @@ function lerLocal<T>(chave: string, padrao: T): T {
 
 function gravarLocal(chave: string, valor: unknown) {
   try {
-    localStorage.setItem(PREFIXO + chave, JSON.stringify(valor));
-    definirArmazenamentoLocalCheio(false);
+    const resultado = gravarComRecuperacaoDeQuota(
+      localStorage,
+      PREFIXO + chave,
+      JSON.stringify(valor),
+    );
+    definirArmazenamentoLocalCheio(!resultado.ok);
   } catch {
-    // Armazenamento cheio/indisponível: a mudança fica só em memória (React
-    // state) e some no próximo reload. Isso não pode passar em silêncio —
-    // é o cenário "encheu o celular da pessoa" — por isso o aviso global.
+    // Falha fora do fluxo normal de quota: mantém o aviso e nunca finge que salvou.
     definirArmazenamentoLocalCheio(true);
   }
 }

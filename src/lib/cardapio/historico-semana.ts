@@ -17,7 +17,10 @@
 import type { EstadoSemana } from './tipos';
 
 const PREFIXO = 'cardapio.v1.';
-const MAX_VERSOES = 20;
+// O histórico é conveniência local, não dado operacional. Oito pontos por
+// semana preservam um desfazer útil sem deixar snapshots completos crescerem
+// indefinidamente até a quota do navegador.
+const MAX_VERSOES = 8;
 
 export interface VersaoSemana {
   em: string; // ISO
