@@ -45,20 +45,11 @@ export function AvisoCritico() {
   const { status, erroDesde, pendentes } = useStatusNuvem();
   const erroSustentado = useErroSustentado(erroDesde);
 
-  if (cheio && status === 'online' && pendentes === 0) {
-    return (
-      <Banner cor="bg-alerta">
-        O cache deste aparelho está sem espaço, mas suas alterações confirmadas continuam salvas
-        na nuvem. O modo offline pode ficar indisponível até liberar espaço.
-      </Banner>
-    );
-  }
-
   if (cheio) {
     return (
       <Banner cor="bg-perigo">
-        O cache deste aparelho está cheio e esta alteração ainda não tem confirmação durável.
-        Não feche a página até a sincronização com a nuvem concluir.
+        Não foi possível salvar — o armazenamento deste aparelho está cheio. A última alteração
+        pode não ter sido gravada. Libere espaço no aparelho e tente de novo.
       </Banner>
     );
   }
