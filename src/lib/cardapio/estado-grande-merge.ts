@@ -1,8 +1,8 @@
 import type { HistoricoPrecos, RegistroAuditoria } from './tipos';
 import { serializarCanonico } from './sync-util';
 
-export const CHAVE_AUDITORIA_V2 = 'auditoria.v2';
-export const CHAVE_HISTORICO_V2 = 'historicoPrecos.v2';
+export const CHAVE_AUDITORIA_V2 = '__v2.auditoria';
+export const CHAVE_HISTORICO_V2 = '__v2.historicoPrecos';
 
 export interface AuditoriaV2 {
   versao: 2;

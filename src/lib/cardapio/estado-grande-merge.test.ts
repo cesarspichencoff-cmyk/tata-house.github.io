@@ -17,6 +17,14 @@ const reg = (em: string, acao: string): RegistroAuditoria => ({
 });
 
 describe('estado-grande-merge', () => {
+  it('mantem as chaves v2 em namespace reservado para clientes antigos ignorarem', async () => {
+    const mod = await import('./estado-grande-merge');
+    expect(mod.CHAVE_AUDITORIA_V2.startsWith('__')).toBe(true);
+    expect(mod.CHAVE_HISTORICO_V2.startsWith('__')).toBe(true);
+    expect(mod.ehChaveEstadoGrande(mod.CHAVE_AUDITORIA_V2)).toBe(true);
+    expect(mod.ehChaveEstadoGrande(mod.CHAVE_HISTORICO_V2)).toBe(true);
+  });
+
   it('faz união determinística de auditoria concorrente sem perder ações', () => {
     const a = auditoriaDeLegado([reg('2026-08-26T10:00:00.000Z', 'A')]);
     const b = auditoriaDeLegado([reg('2026-08-26T10:00:01.000Z', 'B')]);

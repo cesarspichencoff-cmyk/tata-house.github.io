@@ -137,6 +137,7 @@ export function BootNuvem() {
     const revisoes = new Map<string, number>();
     const filasPorChave = new Map<string, Promise<void>>();
     const basesConcorrentes = new Map<string, unknown>();
+    const ultimoEnfileiradoPorChave = new Map<string, unknown>();
 
     const atualizarFilaVisual = () => {
       definirPendentesNuvem(pendentesConhecidos.size, 'boot');
@@ -164,19 +165,21 @@ export function BootNuvem() {
       atualizarFilaVisual();
       definirStatusNuvem('sincronizando');
 
+      // Comeca a tornar o payload duravel IMEDIATAMENTE. A rede da edicao
+      // anterior nao pode atrasar a persistencia da edicao mais nova.
+      const duravel = salvarOutbox(k, valor, baseHint)
+        .then(() => true)
+        .catch(() => {
+          marcarPendenteLegado(k, true);
+          definirStatusNuvem('erro');
+          return false;
+        });
+
       const anterior = filasPorChave.get(k) ?? Promise.resolve();
       const tarefa = anterior
         .catch(() => {})
         .then(async () => {
-          let outboxDuravel = true;
-          try {
-            await salvarOutbox(k, valor, baseHint);
-          } catch {
-            outboxDuravel = false;
-            marcarPendenteLegado(k, true);
-            definirStatusNuvem('erro');
-          }
-
+          const outboxDuravel = await duravel;
           let valorEnviar = valor;
           try {
             if (ehChaveConcorrente(k)) {
@@ -219,6 +222,7 @@ export function BootNuvem() {
               pendentesConhecidos.delete(k);
 
               if (ehChaveConcorrente(k)) {
+                ultimoEnfileiradoPorChave.delete(k);
                 basesConcorrentes.set(k, valorEnviar);
                 const canon = serializarCanonico(valorEnviar);
                 try {
@@ -328,10 +332,19 @@ export function BootNuvem() {
 
         if (ehTata && !k.startsWith('__')) {
           try {
-            // A base desta edicao e o valor imediatamente anterior que ESTE
-            // setItem observou. Isso evita falso conflito quando o mesmo
-            // aparelho faz duas edicoes rapidas antes do primeiro upload.
-            subir(k, JSON.parse(valor), ehChaveConcorrente(k) ? valorAnterior : undefined);
+            const valorJson = JSON.parse(valor);
+            if (ehChaveConcorrente(k)) {
+              // Se ja existe uma edicao desta chave em voo, ela e o ancestral
+              // da proxima. Isso continua correto mesmo quando orig(setItem)
+              // falhou por quota e o localStorage ficou para tras.
+              const baseEnvio = ultimoEnfileiradoPorChave.has(k)
+                ? ultimoEnfileiradoPorChave.get(k)
+                : valorAnterior;
+              ultimoEnfileiradoPorChave.set(k, valorJson);
+              subir(k, valorJson, baseEnvio);
+            } else {
+              subir(k, valorJson);
+            }
           } catch {
             /* valor não-JSON: fica apenas local (ex.: chave Groq/texto bruto) */
           }
@@ -394,11 +407,11 @@ export function BootNuvem() {
     // atualizando o estado React in-place. Semanas passam pelo merge 3-vias.
     const aplicarLocal = (chave: string, valorNuvem: unknown): boolean => {
       if (valorNuvem === null || valorNuvem === undefined) return false;
-      if (chave.startsWith('__')) return false; // marcadores/sondas: nunca vêm da nuvem
       if (ehChaveEstadoGrande(chave)) {
         void aplicarEstadoGrandeDaNuvem(chave, valorNuvem);
         return false;
       }
+      if (chave.startsWith('__')) return false; // demais marcadores/sondas
       if (chave.startsWith('semana.')) return aplicarSemana(chave, valorNuvem as EstadoSemana);
       if (ehChaveConcorrente(chave)) {
         let localAtual: unknown = null;
