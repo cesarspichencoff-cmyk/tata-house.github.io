@@ -152,7 +152,12 @@ export function BootNuvem() {
       definirStatusNuvem('sincronizando');
       return armazenamentoSupabase
         .gravar(k, valor)
-        .then(() => { marcarPendente(k, false); definirStatusNuvem('online'); })
+        .then(() => {
+          marcarPendente(k, false);
+          // Esta chave confirmou, mas só podemos declarar "Sincronizado"
+          // quando TODAS as alterações pendentes estiverem confirmadas.
+          definirStatusNuvem(lerPendentes().length === 0 ? 'online' : 'erro');
+        })
         .catch(() => { marcarPendente(k, true); definirStatusNuvem('erro'); });
     };
 
@@ -314,10 +319,11 @@ export function BootNuvem() {
               const aindaAusente = (await armazenamentoSupabase.ler<unknown>(k, null)) === null;
               if (!aindaAusente) continue; // não é lacuna de verdade — não empurra
               recentes.set(k, Date.now());
-              subir(k, JSON.parse(raw));
+              await subir(k, JSON.parse(raw));
             } catch { /* não-JSON */ }
           }
-          definirStatusNuvem('online');
+          if (lerPendentes().length === 0) definirStatusNuvem('online');
+          else definirStatusNuvem('erro');
           flush(); // reenvia o que ficou pendente de sessões offline anteriores
         } catch {
           // Falhou a busca: NÃO deixa o aparelho preso sem dados. Libera a
