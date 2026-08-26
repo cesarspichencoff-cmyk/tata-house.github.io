@@ -8,7 +8,8 @@ import { DADOS, formatarReais, normalizar } from '@/lib/cardapio/motor';
 
 const CHAVE_TEXTO        = 'cardapio.v1.cotacao.texto';
 const CHAVE_GROQ         = 'cardapio.v1.groq.key';
-const CHAVE_FORNECEDORES = 'cardapio.v1.fornecedores';
+const CHAVE_FORNECEDORES = 'cardapio.v1.cotacao.fornecedoresLista';
+const CHAVE_FORNECEDORES_LEGADO = 'cardapio.v1.fornecedores';
 
 export function AbaCotacao({
   definirPreco,
@@ -52,8 +53,23 @@ export function AbaCotacao({
       const k = localStorage.getItem(CHAVE_GROQ) ?? '';
       setGroqKey(k);
       setKeyRascunho(k);
+
+      // Migração do bug histórico de colisão de chave:
+      // "fornecedores" era ao mesmo tempo mapa item→fornecedor e lista da
+      // cotação. A lista passa a ter namespace próprio.
+      let rawLista = localStorage.getItem(CHAVE_FORNECEDORES);
+      if (rawLista == null) {
+        const legado = localStorage.getItem(CHAVE_FORNECEDORES_LEGADO);
+        try {
+          const parsed = JSON.parse(legado ?? 'null');
+          if (Array.isArray(parsed)) {
+            rawLista = JSON.stringify(parsed);
+            localStorage.setItem(CHAVE_FORNECEDORES, rawLista);
+          }
+        } catch { /* legado não era lista */ }
+      }
       try {
-        const f = JSON.parse(localStorage.getItem(CHAVE_FORNECEDORES) ?? '[]');
+        const f = JSON.parse(rawLista ?? '[]');
         if (Array.isArray(f)) setFornecedoresList(f);
       } catch { /* ok */ }
     } catch { /* sem storage */ }

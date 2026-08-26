@@ -23,6 +23,16 @@ import {
   aguardarBootNuvem,
 } from '@/lib/cardapio/supabase';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
+import {
+  absorverEstadoGrandeLocal,
+  aplicarEstadoGrandeDaNuvem,
+  inicializarEstadoGrandeLocal,
+  liberarEstadoGrandeParaNuvem,
+  reenviarEstadoGrandePendente,
+} from '@/lib/cardapio/estado-grande';
+import { ehChaveEstadoGrande } from '@/lib/cardapio/estado-grande-merge';
+import { inicializarOutbox, listarOutbox, removerOutbox, salvarOutbox } from '@/lib/cardapio/sync-outbox';
+import { adicionarEcoRecente, ehEcoProprio, type EcoRecente } from '@/lib/cardapio/sync-util';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
 import {
@@ -39,6 +49,10 @@ const ig = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 export function BootNuvem() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    // Hidrata IndexedDB/legado cedo. A liberação para ESCREVER na nuvem só
+    // acontece depois que o boot tiver lido o remoto, evitando overwrite cego.
+    void inicializarEstadoGrandeLocal();
 
     // 0) Service worker (PWA offline) — independe do Supabase.
     //
@@ -105,60 +119,132 @@ export function BootNuvem() {
 
     // chaves que ESTE aparelho acabou de gravar — para ignorar o próprio eco
     // quando o Realtime devolver a mudança que nós mesmos fizemos.
-    const recentes: Map<string, number> =
-      (window as unknown as { __nuvemRecentes?: Map<string, number> }).__nuvemRecentes ??
-      ((window as unknown as { __nuvemRecentes?: Map<string, number> }).__nuvemRecentes = new Map());
+    const recentes: Map<string, EcoRecente[]> =
+      (window as unknown as { __nuvemRecentes?: Map<string, EcoRecente[]> }).__nuvemRecentes ??
+      ((window as unknown as { __nuvemRecentes?: Map<string, EcoRecente[]> }).__nuvemRecentes = new Map());
 
     // Outbox offline: chaves cuja última subida à nuvem FALHOU (wifi caiu).
     // Persistem no localStorage e são reenviadas ao reconectar — sem isso,
     // uma edição feita offline nunca chegaria aos outros aparelhos.
-    const PENDENTES = '__pending';
-    const lerPendentes = (): string[] => {
+    const PENDENTES = '__pending'; // legado: migra para IndexedDB e deixa de crescer aqui
+    const lerPendentesLegado = (): string[] => {
       try { return JSON.parse(localStorage.getItem(PREFIXO + PENDENTES) || '[]'); } catch { return []; }
     };
-    const marcarPendente = (k: string, pendente: boolean) => {
-      const arr = lerPendentes().filter((x) => x !== k);
-      if (pendente) arr.push(k);
-      try { orig(PREFIXO + PENDENTES, JSON.stringify(arr)); } catch { /* cheio */ }
-      definirPendentesNuvem(arr.length);
+
+    const pendentesConhecidos = new Set<string>(lerPendentesLegado());
+    const revisoes = new Map<string, number>();
+    const filasPorChave = new Map<string, Promise<void>>();
+
+    const atualizarFilaVisual = () => {
+      definirPendentesNuvem(pendentesConhecidos.size, 'boot');
     };
 
-    // Sobe um valor à nuvem, atualizando status e a fila offline.
-    const subir = (k: string, valor: unknown) => {
+    // Enfileira por CHAVE para preservar ordem. Antes de tocar na rede, o
+    // payload mais novo já está no IndexedDB: quota cheia + wifi caído deixa
+    // de ser um buraco onde a alteração simplesmente desaparece.
+    const subir = (k: string, valor: unknown): Promise<void> => {
+      const revisao = (revisoes.get(k) ?? 0) + 1;
+      revisoes.set(k, revisao);
+      pendentesConhecidos.add(k);
+      atualizarFilaVisual();
       definirStatusNuvem('sincronizando');
-      return armazenamentoSupabase
-        .gravar(k, valor)
-        .then(() => { marcarPendente(k, false); definirStatusNuvem('online'); })
-        .catch(() => { marcarPendente(k, true); definirStatusNuvem('erro'); });
+
+      const duravel = salvarOutbox(k, valor);
+      const anterior = filasPorChave.get(k) ?? Promise.resolve();
+
+      const tarefa = anterior
+        .catch(() => {})
+        .then(async () => {
+          await duravel;
+          recentes.set(k, adicionarEcoRecente(recentes.get(k), valor));
+          try {
+            await armazenamentoSupabase.gravar(k, valor);
+            if (revisoes.get(k) === revisao) {
+              pendentesConhecidos.delete(k);
+              await removerOutbox(k);
+            }
+          } catch {
+            if (revisoes.get(k) === revisao) {
+              pendentesConhecidos.add(k);
+              await salvarOutbox(k, valor);
+              definirStatusNuvem('erro');
+            }
+          } finally {
+            atualizarFilaVisual();
+            if (pendentesConhecidos.size === 0) definirStatusNuvem('online');
+          }
+        });
+
+      let rastreada: Promise<void>;
+      rastreada = tarefa.finally(() => {
+        if (filasPorChave.get(k) === rastreada) filasPorChave.delete(k);
+      });
+      filasPorChave.set(k, rastreada);
+      return rastreada;
     };
 
-    // Restos de uma sessão anterior (aba fechada offline, por exemplo) já
-    // contam no indicador antes mesmo da primeira tentativa de reenvio.
-    definirPendentesNuvem(lerPendentes().length);
+    atualizarFilaVisual();
 
-    // Reenvia tudo que ficou pendente (chamado ao reconectar / voltar à aba).
+    // Reenvia a outbox durável. A chave guarda sempre o payload MAIS NOVO,
+    // portanto várias edições offline do mesmo documento convergem para uma.
     const flush = () => {
-      for (const k of lerPendentes()) {
-        const raw = localStorage.getItem(PREFIXO + k);
-        if (raw == null) { marcarPendente(k, false); continue; }
-        try { subir(k, JSON.parse(raw)); } catch { marcarPendente(k, false); }
-      }
+      void listarOutbox().then((itens) => {
+        for (const item of itens) {
+          pendentesConhecidos.add(item.chave);
+          if (!filasPorChave.has(item.chave)) void subir(item.chave, item.valor);
+        }
+        atualizarFilaVisual();
+      });
     };
+
+    // Migra a lista __pending das versões antigas para a outbox v2.
+    void inicializarOutbox().then(async () => {
+      for (const k of lerPendentesLegado()) {
+        const raw = localStorage.getItem(PREFIXO + k);
+        if (raw == null) continue;
+        try { await salvarOutbox(k, JSON.parse(raw)); } catch { /* não-JSON */ }
+      }
+      try { localStorage.removeItem(PREFIXO + PENDENTES); } catch { /* ignore */ }
+      const itens = await listarOutbox();
+      pendentesConhecidos.clear();
+      itens.forEach((x) => pendentesConhecidos.add(x.chave));
+      atualizarFilaVisual();
+      flush();
+    });
 
     // 1) Espelha toda gravação local (cardapio.v1.*) na nuvem.
     if (!(window as unknown as { __nuvemPatched?: boolean }).__nuvemPatched) {
       localStorage.setItem = (chave: string, valor: string) => {
-        orig(chave, valor);
-        if (typeof chave === 'string' && chave.startsWith(PREFIXO)) {
-          const k = chave.slice(PREFIXO.length);
-          if (k.startsWith('__')) return; // marcadores locais (base/pending) — não vão à nuvem
-          recentes.set(k, Date.now());
+        const ehTata = typeof chave === 'string' && chave.startsWith(PREFIXO);
+        const k = ehTata ? chave.slice(PREFIXO.length) : '';
+
+        if (ehTata && ehChaveEstadoGrande(k)) {
+          // Compatibilidade defensiva: código antigo que ainda tente escrever
+          // os blobs grandes é redirecionado para memória/IndexedDB.
+          try { absorverEstadoGrandeLocal(k, JSON.parse(valor)); } catch { /* não-JSON */ }
+          return;
+        }
+
+        // A nuvem não pode depender da quota do cache. Tentamos o local, mas
+        // mesmo quando ele lança QuotaExceededError o upload do valor JSON
+        // ainda é disparado. Depois repropagamos o erro para o chamador poder
+        // exibir o banner/recuperar cache sem fingir que a gravação local venceu.
+        let erroLocal: unknown = null;
+        try {
+          orig(chave, valor);
+        } catch (e) {
+          erroLocal = e;
+        }
+
+        if (ehTata && !k.startsWith('__')) {
           try {
             subir(k, JSON.parse(valor));
           } catch {
-            /* valor não-JSON: ignora */
+            /* valor não-JSON: fica apenas local (ex.: chave Groq/texto bruto) */
           }
         }
+
+        if (erroLocal) throw erroLocal;
       };
       (window as unknown as { __nuvemPatched?: boolean }).__nuvemPatched = true;
     }
@@ -206,7 +292,6 @@ export function BootNuvem() {
       // para toda a equipe. Aqui o aparelho apenas se alinha à nuvem e volta a
       // ter base, e qualquer edição real feita depois sobe normalmente.
       if (base && !ig(merged, remote)) {
-        recentes.set(chave, Date.now());
         subir(chave, merged);
       }
       return mudouLocal;
@@ -217,6 +302,10 @@ export function BootNuvem() {
     const aplicarLocal = (chave: string, valorNuvem: unknown): boolean => {
       if (valorNuvem === null || valorNuvem === undefined) return false;
       if (chave.startsWith('__')) return false; // marcadores/sondas: nunca vêm da nuvem
+      if (ehChaveEstadoGrande(chave)) {
+        void aplicarEstadoGrandeDaNuvem(chave, valorNuvem);
+        return false;
+      }
       if (chave.startsWith('semana.')) return aplicarSemana(chave, valorNuvem as EstadoSemana);
       const novo = JSON.stringify(valorNuvem);
       if (novo !== localStorage.getItem(PREFIXO + chave)) {
@@ -253,7 +342,20 @@ export function BootNuvem() {
         try {
           const chavesNuvem = await armazenamentoSupabase.listarChaves();
           const setNuvem = new Set(chavesNuvem);
+          // Fase 1: migra/reconcilia PRIMEIRO os blobs grandes. Em aparelhos
+          // que já estão no limite do localStorage, isso permite confirmar
+          // a cópia v2 e remover o legado local ANTES de tentar materializar
+          // qualquer outra chave remota no cache.
           for (const chave of chavesNuvem) {
+            if (!ehChaveEstadoGrande(chave)) continue;
+            const valorNuvem = await armazenamentoSupabase.ler<unknown>(chave, null);
+            await aplicarEstadoGrandeDaNuvem(chave, valorNuvem);
+          }
+          await liberarEstadoGrandeParaNuvem(chavesNuvem);
+
+          // Fase 2: com a quota liberada, reconcilia o restante do cache local.
+          for (const chave of chavesNuvem) {
+            if (ehChaveEstadoGrande(chave)) continue;
             const valorNuvem = await armazenamentoSupabase.ler<unknown>(chave, null);
             aplicarLocal(chave, valorNuvem);
           }
@@ -267,13 +369,12 @@ export function BootNuvem() {
             const kFull = localStorage.key(i);
             if (!kFull || !kFull.startsWith(PREFIXO)) continue;
             const k = kFull.slice(PREFIXO.length);
-            if (k.startsWith('__') || setNuvem.has(k)) continue;
+            if (k.startsWith('__') || ehChaveEstadoGrande(k) || setNuvem.has(k)) continue;
             const raw = localStorage.getItem(kFull);
             if (raw == null) continue;
             try {
               const aindaAusente = (await armazenamentoSupabase.ler<unknown>(k, null)) === null;
               if (!aindaAusente) continue; // não é lacuna de verdade — não empurra
-              recentes.set(k, Date.now());
               subir(k, JSON.parse(raw));
             } catch { /* não-JSON */ }
           }
@@ -311,8 +412,19 @@ export function BootNuvem() {
             (payload) => {
               const linha = payload.new;
               if (!linha || typeof linha.chave !== 'string') return;
-              const ts = recentes.get(linha.chave);
-              if (ts && Date.now() - ts < 8000) return; // eco da nossa própria escrita
+              if (ehChaveEstadoGrande(linha.chave)) {
+                void aplicarEstadoGrandeDaNuvem(linha.chave, linha.valor);
+                return;
+              }
+
+              let valorLocalAtual: unknown = null;
+              try {
+                const rawAtual = localStorage.getItem(PREFIXO + linha.chave);
+                valorLocalAtual = rawAtual == null ? null : JSON.parse(rawAtual);
+              } catch { /* valor local inválido: não tratamos como eco */ }
+
+              const ecos = recentes.get(linha.chave);
+              if (ehEcoProprio(ecos, linha.valor, valorLocalAtual)) return;
               aplicarLocal(linha.chave, linha.valor); // reconcilia in-place, sem reload
             },
           )
@@ -336,6 +448,7 @@ export function BootNuvem() {
     //    isso de quem só quer ver o cardápio do dia.
     const sincronizar = () => {
       flush();
+      void reenviarEstadoGrandePendente();
       void puxarDaNuvem(); // no-op se a busca deste carregamento já deu certo
     };
     const aoReconectar = () => sincronizar();

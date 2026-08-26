@@ -1,25 +1,17 @@
 'use client';
 
-/* =====================================================================
-   Diagnóstico da nuvem — responde, em português claro, à única pergunta
-   que importa quando algo "some": ESTE aparelho está mesmo conversando
-   com a nuvem, ou está trabalhando sozinho achando que sincroniza?
-
-   Por que isso existe: até aqui, quando a nuvem estava desconfigurada ou
-   recusando acesso, o app não dizia NADA — seguia gravando só no próprio
-   aparelho. Cada celular virava uma ilha, e ninguém percebia até um dado
-   "sumir" (ou até alguém limpar os dados do aparelho e perder tudo).
-   Diagnosticar isso exigia abrir painel do Supabase; agora é um botão.
-
-   Segurança: a chave anônima NUNCA é exibida — só dizemos se existe e
-   quantos caracteres tem. O endereço mostra apenas o domínio.
-   ===================================================================== */
-
+import {
+  CHAVE_AUDITORIA_V2,
+  CHAVE_HISTORICO_V2,
+  ehChaveEstadoGrande,
+} from '../estado-grande-merge';
+import { serializarCanonico } from '../sync-util';
 import { supabaseConfig, supabaseHabilitado, ESPACO_DADOS, PREFIXO_LOCAL } from './config';
 import { getSupabase } from './client';
 
 const TABELA = 'tata_estado';
 const CHAVE_TESTE = '__diagnostico';
+const LOCAIS_APENAS = new Set(['cotacao.texto', 'groq.key']);
 
 export type Veredito = 'ok' | 'falha' | 'aviso';
 
@@ -35,151 +27,201 @@ export interface ResultadoDiagnostico {
   vereditoGeral: Veredito;
 }
 
-/** Traduz o erro cru do Supabase para uma explicação acionável. */
+interface MedidaLocal {
+  valores: Map<string, string>;
+  totalBytes: number;
+  maiores: { chave: string; bytes: number }[];
+}
+
 function explicar(erro: unknown): string {
-  const e = (erro ?? {}) as { message?: string; code?: string; details?: string; hint?: string };
+  const e = (erro ?? {}) as { message?: string; code?: string };
   const msg = (e.message ?? String(erro ?? '')).trim();
   const code = e.code ?? '';
   const baixo = msg.toLowerCase();
 
   if (baixo.includes('invalid api key') || baixo.includes('jwt') || baixo.includes('apikey')) {
-    return `A chave de acesso da nuvem não é aceita (${msg}). A chave publicada no site está diferente da que o Supabase espera — normalmente porque a chave foi trocada/renovada no painel e o site não foi republicado.`;
+    return `A chave de acesso da nuvem não é aceita (${msg}).`;
   }
   if (code === '42P01' || baixo.includes('does not exist') || baixo.includes('not find the table')) {
-    return `A tabela "${TABELA}" não foi encontrada no banco (${msg}). O banco está no ar, mas sem a tabela que guarda os dados.`;
+    return `A tabela "${TABELA}" não foi encontrada (${msg}).`;
   }
   if (code === '42501' || baixo.includes('row-level security') || baixo.includes('permission denied')) {
-    return `O banco recusou o acesso por regra de segurança (${msg}). A tabela existe, mas a permissão para a chave pública foi fechada — é o que acontece se a seção "OPCIONAL" da migração de segurança tiver sido executada.`;
+    return `O banco recusou o acesso por regra de segurança (${msg}).`;
   }
   if (baixo.includes('failed to fetch') || baixo.includes('networkerror') || baixo.includes('load failed')) {
-    return `Não houve resposta da nuvem (${msg}). Ou este aparelho está sem internet, ou o projeto do Supabase está pausado/fora do ar.`;
+    return `Não houve resposta da nuvem (${msg}).`;
   }
   return msg || 'Erro sem mensagem.';
 }
 
-function contarChavesLocais(): number {
-  if (typeof window === 'undefined') return 0;
-  let n = 0;
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k && k.startsWith(PREFIXO_LOCAL) && !k.startsWith(PREFIXO_LOCAL + '__')) n++;
+function bytesDe(texto: string): number {
+  try {
+    return new TextEncoder().encode(texto).byteLength;
+  } catch {
+    return texto.length * 2;
   }
-  return n;
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function medirLocal(): MedidaLocal {
+  const valores = new Map<string, string>();
+  const tamanhos: { chave: string; bytes: number }[] = [];
+  let totalBytes = 0;
+
+  if (typeof window === 'undefined') return { valores, totalBytes, maiores: [] };
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const full = localStorage.key(i);
+    if (!full || !full.startsWith(PREFIXO_LOCAL)) continue;
+    const chave = full.slice(PREFIXO_LOCAL.length);
+    if (chave.startsWith('__')) continue;
+    const raw = localStorage.getItem(full) ?? '';
+    const bytes = bytesDe(full) + bytesDe(raw);
+    valores.set(chave, raw);
+    tamanhos.push({ chave, bytes });
+    totalBytes += bytes;
+  }
+
+  tamanhos.sort((a, b) => b.bytes - a.bytes);
+  return { valores, totalBytes, maiores: tamanhos.slice(0, 7) };
+}
+
+function parseJson(raw: string): unknown {
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+function comparavel(chave: string): boolean {
+  return !chave.startsWith('__') && !LOCAIS_APENAS.has(chave) && !ehChaveEstadoGrande(chave);
 }
 
 export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
   const itens: ItemDiagnostico[] = [];
-  const local = contarChavesLocais();
-
-  // ---------- 1) Este site foi publicado com a nuvem configurada? ----------
+  const local = medirLocal();
   const { url, anonKey } = supabaseConfig();
+
+  itens.push({
+    titulo: 'Armazenamento deste aparelho',
+    veredito: local.totalBytes > 4 * 1024 * 1024 ? 'aviso' : 'ok',
+    detalhe:
+      `${local.valores.size} chave(s) · ${fmtBytes(local.totalBytes)} no localStorage. ` +
+      (local.maiores.length
+        ? `Maiores: ${local.maiores.map((x) => `${x.chave} (${fmtBytes(x.bytes)})`).join(', ')}.`
+        : 'Nenhuma chave local.'),
+  });
+
+  if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+    try {
+      const e = await navigator.storage.estimate();
+      if (typeof e.usage === 'number' && typeof e.quota === 'number' && e.quota > 0) {
+        itens.push({
+          titulo: 'Quota total do navegador',
+          veredito: e.usage / e.quota > 0.8 ? 'aviso' : 'ok',
+          detalhe: `${fmtBytes(e.usage)} usados de aproximadamente ${fmtBytes(e.quota)} disponíveis para este site (inclui IndexedDB/cache, não só localStorage).`,
+        });
+      }
+    } catch { /* opcional */ }
+  }
+
   if (!supabaseHabilitado()) {
     itens.push({
       titulo: 'Configuração da nuvem neste site',
       veredito: 'falha',
-      detalhe:
-        `A nuvem NÃO está configurada nesta versão publicada do site` +
-        `${url ? '' : ' (falta o endereço)'}${anonKey ? '' : ' (falta a chave de acesso)'}. ` +
-        `Sem isso o app funciona só neste aparelho: nada é enviado nem recebido, ` +
-        `e cada pessoa enxerga apenas o que ela mesma digitou. ` +
-        `Correção: preencher os segredos SUPABASE_URL e SUPABASE_ANON_KEY no GitHub e publicar de novo.`,
-    });
-    itens.push({
-      titulo: 'Dados guardados neste aparelho',
-      veredito: local > 0 ? 'aviso' : 'falha',
-      detalhe:
-        `${local} item(ns) salvos localmente. Como a nuvem está desligada, eles existem SÓ aqui — ` +
-        `limpar os dados do navegador apaga tudo de forma definitiva.`,
+      detalhe: `A nuvem não está configurada${url ? '' : ' (falta endereço)'}${anonKey ? '' : ' (falta chave)'}.`,
     });
     return {
       itens,
       vereditoGeral: 'falha',
-      resumo: 'A nuvem está desligada nesta versão do site. O app está funcionando isolado neste aparelho.',
+      resumo: 'A nuvem está desligada nesta versão do site.',
     };
   }
 
   let host = url;
-  try {
-    host = new URL(url).host;
-  } catch {
-    /* mantém como veio */
-  }
+  try { host = new URL(url).host; } catch { /* mantém */ }
   itens.push({
     titulo: 'Configuração da nuvem neste site',
     veredito: 'ok',
-    detalhe: `Endereço: ${host} · chave de acesso presente (${anonKey.length} caracteres) · espaço de dados: "${ESPACO_DADOS}".`,
+    detalhe: `Endereço: ${host} · chave presente (${anonKey.length} caracteres) · espaço "${ESPACO_DADOS}".`,
   });
 
-  // ---------- 2) O cliente da nuvem inicializa? ----------
   const sb = await getSupabase();
   if (!sb) {
-    itens.push({
-      titulo: 'Conexão com a nuvem',
-      veredito: 'falha',
-      detalhe: 'O app não conseguiu iniciar a conexão com a nuvem, mesmo com o endereço configurado.',
-    });
+    itens.push({ titulo: 'Conexão com a nuvem', veredito: 'falha', detalhe: 'O cliente Supabase não inicializou.' });
     return { itens, vereditoGeral: 'falha', resumo: 'Não foi possível iniciar a conexão com a nuvem.' };
   }
 
-  // ---------- 3) LEITURA: consegue enxergar o que está lá? ----------
-  let chavesNaNuvem: string[] | null = null;
+  let linhas: { chave: string; valor: unknown; atualizado_em?: string }[] | null = null;
   try {
-    const res = (await sb.from(TABELA).select('chave').eq('espaco', ESPACO_DADOS)) as {
-      data: { chave: string }[] | null;
-      error: unknown;
-    };
-    if (res.error) {
-      itens.push({ titulo: 'Leitura da nuvem', veredito: 'falha', detalhe: explicar(res.error) });
-    } else {
-      chavesNaNuvem = (res.data ?? []).map((r) => r.chave);
-      const semanas = chavesNaNuvem.filter((c) => c.startsWith('semana.')).length;
-      itens.push({
-        titulo: 'Leitura da nuvem',
-        veredito: chavesNaNuvem.length > 0 ? 'ok' : 'aviso',
-        detalhe:
-          chavesNaNuvem.length > 0
-            ? `Funcionou. A nuvem tem ${chavesNaNuvem.length} item(ns), sendo ${semanas} semana(s) de cardápio.`
-            : 'A leitura funcionou, mas a nuvem está VAZIA — nunca chegou dado nenhum lá, ou o conteúdo foi apagado.',
-      });
-    }
+    const res = (await sb
+      .from(TABELA)
+      .select('chave,valor,atualizado_em')
+      .eq('espaco', ESPACO_DADOS)) as {
+        data: { chave: string; valor: unknown; atualizado_em?: string }[] | null;
+        error: unknown;
+      };
+    if (res.error) throw res.error;
+    linhas = res.data ?? [];
+    itens.push({
+      titulo: 'Leitura da nuvem',
+      veredito: linhas.length > 0 ? 'ok' : 'aviso',
+      detalhe: `Funcionou. A nuvem tem ${linhas.length} chave(s).`,
+    });
   } catch (e) {
     itens.push({ titulo: 'Leitura da nuvem', veredito: 'falha', detalhe: explicar(e) });
   }
 
-  // ---------- 4) ESCRITA: consegue gravar de verdade? ----------
   try {
     const carimbo = new Date().toISOString();
     const res = (await sb.from(TABELA).upsert(
       { espaco: ESPACO_DADOS, chave: CHAVE_TESTE, valor: { teste: carimbo }, atualizado_em: carimbo },
       { onConflict: 'espaco,chave' },
     )) as { error: unknown };
-    if (res.error) {
-      itens.push({ titulo: 'Gravação na nuvem', veredito: 'falha', detalhe: explicar(res.error) });
-    } else {
-      itens.push({
-        titulo: 'Gravação na nuvem',
-        veredito: 'ok',
-        detalhe: 'Funcionou. Este aparelho consegue enviar dados para a nuvem.',
-      });
-      // Limpa o registro de teste — não deixa sujeira no banco.
-      try {
-        await sb.from(TABELA).delete().eq('espaco', ESPACO_DADOS).eq('chave', CHAVE_TESTE);
-      } catch {
-        /* sobra um registro de teste inofensivo */
-      }
-    }
+    if (res.error) throw res.error;
+    itens.push({ titulo: 'Gravação na nuvem', veredito: 'ok', detalhe: 'Funcionou. Este aparelho consegue gravar no Supabase.' });
+    try { await sb.from(TABELA).delete().eq('espaco', ESPACO_DADOS).eq('chave', CHAVE_TESTE); } catch { /* inofensivo */ }
   } catch (e) {
     itens.push({ titulo: 'Gravação na nuvem', veredito: 'falha', detalhe: explicar(e) });
   }
 
-  // ---------- 5) Comparação local × nuvem ----------
-  if (chavesNaNuvem !== null) {
-    const faltando = chavesNaNuvem.length === 0 && local > 0;
+  if (linhas) {
+    const remoto = new Map(linhas.map((r) => [r.chave, r.valor]));
+    const localComp = new Set(Array.from(local.valores.keys()).filter(comparavel));
+    const remotoComp = new Set(Array.from(remoto.keys()).filter(comparavel));
+
+    const soLocal = Array.from(localComp).filter((k) => !remotoComp.has(k));
+    const soNuvem = Array.from(remotoComp).filter((k) => !localComp.has(k));
+    const divergentes: string[] = [];
+
+    for (const k of Array.from(localComp)) {
+      if (!remotoComp.has(k)) continue;
+      const l = parseJson(local.valores.get(k) ?? '');
+      const r = remoto.get(k);
+      if (serializarCanonico(l) !== serializarCanonico(r)) divergentes.push(k);
+    }
+
+    const ok = soLocal.length === 0 && soNuvem.length === 0 && divergentes.length === 0;
     itens.push({
-      titulo: 'Este aparelho × nuvem',
-      veredito: faltando ? 'falha' : 'ok',
-      detalhe: `Neste aparelho: ${local} item(ns). Na nuvem: ${chavesNaNuvem.length} item(ns).` +
-        (faltando ? ' Os dados existem só aqui — nunca subiram.' : ''),
+      titulo: 'Integridade aparelho × nuvem',
+      veredito: ok ? 'ok' : 'aviso',
+      detalhe: ok
+        ? `As ${localComp.size} chaves operacionais comparáveis têm o mesmo conteúdo nos dois lados.`
+        : `Só local: ${soLocal.join(', ') || 'nenhuma'} · só nuvem: ${soNuvem.join(', ') || 'nenhuma'} · conteúdo diferente: ${divergentes.join(', ') || 'nenhum'}.`,
+    });
+
+    const temAudV2 = remoto.has(CHAVE_AUDITORIA_V2);
+    const temHistV2 = remoto.has(CHAVE_HISTORICO_V2);
+    const legadoAudLocal = local.valores.has('auditoria');
+    const legadoHistLocal = local.valores.has('historicoPrecos');
+    itens.push({
+      titulo: 'Estados grandes (quota)',
+      veredito: temAudV2 && temHistV2 && !legadoAudLocal && !legadoHistLocal ? 'ok' : 'aviso',
+      detalhe:
+        `auditoria.v2: ${temAudV2 ? 'na nuvem' : 'ausente'} · historicoPrecos.v2: ${temHistV2 ? 'na nuvem' : 'ausente'} · ` +
+        `legado local: auditoria ${legadoAudLocal ? 'presente' : 'removida'}, histórico ${legadoHistLocal ? 'presente' : 'removido'}.`,
     });
   }
 
@@ -189,14 +231,13 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
     itens,
     vereditoGeral: houveFalha ? 'falha' : houveAviso ? 'aviso' : 'ok',
     resumo: houveFalha
-      ? 'Encontrei um problema que impede a sincronização. Veja o item marcado em vermelho.'
+      ? 'Há uma falha real de sincronização.'
       : houveAviso
-        ? 'A conexão funciona, mas há um ponto de atenção.'
-        : 'Tudo certo: este aparelho lê e grava na nuvem normalmente.',
+        ? 'A conexão funciona, mas há divergência ou migração ainda pendente.'
+        : 'Tudo certo: armazenamento e conteúdo estão coerentes com a nuvem.',
   };
 }
 
-/** Texto simples para a pessoa copiar e mandar para quem dá suporte. */
 export function formatarDiagnostico(r: ResultadoDiagnostico): string {
   const marca = (v: Veredito) => (v === 'ok' ? '[OK]' : v === 'aviso' ? '[ATENÇÃO]' : '[FALHA]');
   return [
