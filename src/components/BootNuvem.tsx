@@ -213,6 +213,15 @@ export function BootNuvem() {
             recentes.set(k, adicionarEcoRecente(recentes.get(k), valorEnviar));
             await armazenamentoSupabase.gravar(k, valorEnviar);
 
+            // upload confirmado sempre avanca o ancestral comum.
+// Cada tarefa desta chave roda em série. Portanto, depois que ESTE
+            // upload confirmou, valorEnviar virou o ancestral comum real da
+            // próxima tarefa, mesmo que uma revisão mais nova já esteja na fila.
+            // Só limpeza de outbox/cache depende de esta ainda ser a revisão final.
+            if (ehChaveConcorrente(k)) {
+              basesConcorrentes.set(k, valorEnviar);
+            }
+
             if (revisoes.get(k) === revisao) {
               // Primeiro elimina a marca legada; se isso falhar, preserva a
               // outbox duravel para que a proxima rodada possa tentar de novo.
@@ -235,7 +244,6 @@ export function BootNuvem() {
               pendentesConhecidos.delete(k);
 
               if (ehChaveConcorrente(k)) {
-                basesConcorrentes.set(k, valorEnviar);
                 const canon = serializarCanonico(valorEnviar);
                 try {
                   const raw = localStorage.getItem(PREFIXO + k);

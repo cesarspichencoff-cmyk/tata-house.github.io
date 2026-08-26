@@ -95,4 +95,33 @@ describe('sync-concorrente', () => {
     const r = mesclarDocumentoConcorrenteSeguro(b.conhecida, b.valor, { arroz: 12 }, { arroz: 10 });
     expect(r.conflitos).toEqual(['(base-desconhecida)']);
   });
+
+  it('fila online 10 para 11 para 12 usa 11 como base depois do primeiro upload confirmado', () => {
+    // Estado comum inicial: 10.
+    let baseAtual = { arroz: 10 };
+
+    const primeiraBase = selecionarBaseConcorrente(true, baseAtual, { arroz: 10 });
+    const primeira = mesclarDocumentoConcorrenteSeguro(
+      primeiraBase.conhecida,
+      primeiraBase.valor,
+      { arroz: 11 },
+      { arroz: 10 },
+    );
+    expect(primeira.conflitos).toEqual([]);
+    expect(primeira.valor).toEqual({ arroz: 11 });
+
+    // Simula exatamente o ponto do BootNuvem APOS o upload de 11 confirmar:
+    // a base comum avanca mesmo que a revisao 12 ja esteja enfileirada.
+    baseAtual = primeira.valor as { arroz: number };
+
+    const segundaBase = selecionarBaseConcorrente(true, baseAtual, { arroz: 10 });
+    const segunda = mesclarDocumentoConcorrenteSeguro(
+      segundaBase.conhecida,
+      segundaBase.valor,
+      { arroz: 12 },
+      { arroz: 11 },
+    );
+    expect(segunda.conflitos).toEqual([]);
+    expect(segunda.valor).toEqual({ arroz: 12 });
+  });
 });
