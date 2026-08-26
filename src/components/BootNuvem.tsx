@@ -23,6 +23,14 @@ import {
   aguardarBootNuvem,
 } from '@/lib/cardapio/supabase';
 import { notificarChaveExterna } from '@/lib/cardapio/estado';
+import {
+  aplicarRawRemoto,
+  definirSombraRaw,
+  gravarRawCache,
+  lerRawCache,
+  listarChavesCache,
+} from '@/lib/cardapio/cache-local';
+import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
 import {
@@ -78,17 +86,17 @@ export function BootNuvem() {
     // aparelho, e só se a semana ainda estiver no estado errado.
     void aguardarBootNuvem().then(() => {
       try {
-        if (localStorage.getItem(MARCA_REPARO)) return;
-        const bruto = localStorage.getItem(PREFIXO + SEMANA_REPARO);
+        if (lerRawCache(MARCA_REPARO)) return;
+        const bruto = lerRawCache(PREFIXO + SEMANA_REPARO);
         const semana = bruto ? (JSON.parse(bruto) as EstadoSemana) : null;
         if (semana && precisaReparo(semana)) {
           registrarVersao(SEMANA_REPARO, semana, 'local');
           // setItem espelha na nuvem quando ela está ligada — a correção
           // chega sozinha aos outros aparelhos.
-          localStorage.setItem(PREFIXO + SEMANA_REPARO, JSON.stringify(aplicarReparo(semana)));
+          gravarRawCache(PREFIXO + SEMANA_REPARO, JSON.stringify(aplicarReparo(semana)));
           notificarChaveExterna(SEMANA_REPARO);
         }
-        localStorage.setItem(MARCA_REPARO, '1'); // chave "__": não vai à nuvem
+        gravarRawCache(MARCA_REPARO, '1'); // chave "__": não vai à nuvem
       } catch {
         /* reparo é um extra: nunca atrapalha o resto */
       }
@@ -113,13 +121,29 @@ export function BootNuvem() {
     // Persistem no localStorage e são reenviadas ao reconectar — sem isso,
     // uma edição feita offline nunca chegaria aos outros aparelhos.
     const PENDENTES = '__pending';
-    const lerPendentes = (): string[] => {
-      try { return JSON.parse(localStorage.getItem(PREFIXO + PENDENTES) || '[]'); } catch { return []; }
-    };
+    const pendentesMemoria = new Set<string>();
+    try {
+      const herdados = JSON.parse(lerRawCache(PREFIXO + PENDENTES) || '[]') as unknown;
+      if (Array.isArray(herdados)) {
+        for (const k of herdados) if (typeof k === 'string') pendentesMemoria.add(k);
+      }
+    } catch {
+      /* fila começa vazia */
+    }
+    const lerPendentes = (): string[] => Array.from(pendentesMemoria);
     const marcarPendente = (k: string, pendente: boolean) => {
-      const arr = lerPendentes().filter((x) => x !== k);
-      if (pendente) arr.push(k);
-      try { orig(PREFIXO + PENDENTES, JSON.stringify(arr)); } catch { /* cheio */ }
+      if (pendente) pendentesMemoria.add(k);
+      else pendentesMemoria.delete(k);
+      const arr = lerPendentes();
+      const serializado = JSON.stringify(arr);
+      definirSombraRaw(PREFIXO + PENDENTES, serializado);
+      try {
+        orig(PREFIXO + PENDENTES, serializado);
+      } catch {
+        // A fila continua em memória. Se a página for fechada enquanto a
+        // nuvem também estiver fora, o aviso crítico orienta a não fechar.
+        definirArmazenamentoLocalCheio(true);
+      }
       definirPendentesNuvem(arr.length);
     };
 
@@ -139,7 +163,7 @@ export function BootNuvem() {
     // Reenvia tudo que ficou pendente (chamado ao reconectar / voltar à aba).
     const flush = () => {
       for (const k of lerPendentes()) {
-        const raw = localStorage.getItem(PREFIXO + k);
+        const raw = lerRawCache(PREFIXO + k);
         if (raw == null) { marcarPendente(k, false); continue; }
         try { subir(k, JSON.parse(raw)); } catch { marcarPendente(k, false); }
       }
@@ -148,17 +172,34 @@ export function BootNuvem() {
     // 1) Espelha toda gravação local (cardapio.v1.*) na nuvem.
     if (!(window as unknown as { __nuvemPatched?: boolean }).__nuvemPatched) {
       localStorage.setItem = (chave: string, valor: string) => {
-        orig(chave, valor);
+        // Primeiro: memória. Depois: cache físico best-effort. Só então
+        // reportamos eventual erro local ao chamador — MAS o transporte para
+        // Supabase é iniciado mesmo quando a escrita física estoura quota.
+        definirSombraRaw(chave, valor);
+        let erroLocal: unknown = null;
+        try {
+          orig(chave, valor);
+          definirArmazenamentoLocalCheio(false);
+        } catch (e) {
+          erroLocal = e;
+          definirArmazenamentoLocalCheio(true);
+        }
+
         if (typeof chave === 'string' && chave.startsWith(PREFIXO)) {
           const k = chave.slice(PREFIXO.length);
-          if (k.startsWith('__')) return; // marcadores locais (base/pending) — não vão à nuvem
-          recentes.set(k, Date.now());
-          try {
-            subir(k, JSON.parse(valor));
-          } catch {
-            /* valor não-JSON: ignora */
+          if (!k.startsWith('__')) {
+            recentes.set(k, Date.now());
+            try {
+              void subir(k, JSON.parse(valor));
+            } catch {
+              /* valor não-JSON: não é documento sincronizável */
+            }
           }
         }
+
+        // Mantém a semântica do Storage para quem precisa saber que o modo
+        // offline físico falhou. A chamada ao Supabase já foi disparada acima.
+        if (erroLocal) throw erroLocal;
       };
       (window as unknown as { __nuvemPatched?: boolean }).__nuvemPatched = true;
     }
@@ -168,23 +209,23 @@ export function BootNuvem() {
     // a edição local. Persiste no localStorage (sobrevive entre sessões).
     const lerBase = (chave: string): EstadoSemana | null => {
       try {
-        const r = localStorage.getItem(PREFIXO + '__base.' + chave);
+        const r = lerRawCache(PREFIXO + '__base.' + chave);
         return r ? (JSON.parse(r) as EstadoSemana) : null;
       } catch {
         return null;
       }
     };
     const gravarBase = (chave: string, valor: unknown) => {
-      try { orig(PREFIXO + '__base.' + chave, JSON.stringify(valor)); } catch { /* cheio */ }
+      aplicarRawRemoto(PREFIXO + '__base.' + chave, JSON.stringify(valor));
     };
 
     // Semana: merge 3-vias (base, local, remote) em vez de sobrescrever.
     const aplicarSemana = (chave: string, remote: EstadoSemana): boolean => {
-      const localRaw = localStorage.getItem(PREFIXO + chave);
+      const localRaw = lerRawCache(PREFIXO + chave);
       let local: EstadoSemana | null = null;
       try { local = localRaw ? (JSON.parse(localRaw) as EstadoSemana) : null; } catch { local = null; }
       if (!local) {
-        orig(PREFIXO + chave, JSON.stringify(remote));
+        aplicarRawRemoto(PREFIXO + chave, JSON.stringify(remote));
         gravarBase(chave, remote);
         notificarChaveExterna(chave);
         return true;
@@ -197,7 +238,7 @@ export function BootNuvem() {
       gravarBase(chave, remote); // a base passa a ser o que a nuvem mandou
       const mudouLocal = !ig(merged, local);
       if (mudouLocal) {
-        orig(PREFIXO + chave, JSON.stringify(merged));
+        aplicarRawRemoto(PREFIXO + chave, JSON.stringify(merged));
         notificarChaveExterna(chave);
       }
       // Se o merge difere do que a nuvem tem, devolve o merge para convergir —
@@ -219,8 +260,8 @@ export function BootNuvem() {
       if (chave.startsWith('__')) return false; // marcadores/sondas: nunca vêm da nuvem
       if (chave.startsWith('semana.')) return aplicarSemana(chave, valorNuvem as EstadoSemana);
       const novo = JSON.stringify(valorNuvem);
-      if (novo !== localStorage.getItem(PREFIXO + chave)) {
-        orig(PREFIXO + chave, novo); // grava sem reenviar à nuvem
+      if (novo !== lerRawCache(PREFIXO + chave)) {
+        aplicarRawRemoto(PREFIXO + chave, novo); // sombra + cache físico best-effort, sem eco
         notificarChaveExterna(chave); // reconcilia o estado React, sem reload
         return true;
       }
@@ -263,12 +304,11 @@ export function BootNuvem() {
           // Reconfere ponto-a-ponto antes de empurrar (2ª camada de segurança:
           // mesmo que `chavesNuvem` tenha vindo incompleta por algum motivo,
           // uma checagem direta da chave evita apagar dado real na nuvem).
-          for (let i = 0; i < localStorage.length; i++) {
-            const kFull = localStorage.key(i);
-            if (!kFull || !kFull.startsWith(PREFIXO)) continue;
+          for (const kFull of listarChavesCache(PREFIXO)) {
+            if (!kFull.startsWith(PREFIXO)) continue;
             const k = kFull.slice(PREFIXO.length);
             if (k.startsWith('__') || setNuvem.has(k)) continue;
-            const raw = localStorage.getItem(kFull);
+            const raw = lerRawCache(kFull);
             if (raw == null) continue;
             try {
               const aindaAusente = (await armazenamentoSupabase.ler<unknown>(k, null)) === null;
@@ -321,7 +361,7 @@ export function BootNuvem() {
           // conseguir alcançar a nuvem mostrava a bolinha verde "Sincronizado"
           // do mesmo jeito. Agora o status vem do resultado real da inscrição.
           .subscribe((status: string) => {
-            if (status === 'SUBSCRIBED') definirStatusNuvem('online');
+            if (status === 'SUBSCRIBED' && lerPendentes().length === 0) definirStatusNuvem('online');
             else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') definirStatusNuvem('erro');
           });
       } catch {

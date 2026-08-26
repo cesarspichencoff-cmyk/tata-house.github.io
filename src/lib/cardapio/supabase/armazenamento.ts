@@ -10,7 +10,7 @@
 
 import { ESPACO_DADOS, PREFIXO_LOCAL, supabaseHabilitado } from './config';
 import { getSupabase } from './client';
-import { definirArmazenamentoLocalCheio } from '../aviso-armazenamento';
+import { gravarRawCache, lerRawCache, listarChavesCache, removerRawCache } from '../cache-local';
 
 export interface Armazenamento {
   ler<T>(chave: string, padrao: T): Promise<T>;
@@ -26,7 +26,7 @@ export const armazenamentoLocal: Armazenamento = {
   async ler<T>(chave: string, padrao: T): Promise<T> {
     if (typeof window === 'undefined') return padrao;
     try {
-      const raw = localStorage.getItem(PREFIXO_LOCAL + chave);
+      const raw = lerRawCache(PREFIXO_LOCAL + chave);
       return raw ? (JSON.parse(raw) as T) : padrao;
     } catch {
       return padrao;
@@ -34,30 +34,15 @@ export const armazenamentoLocal: Armazenamento = {
   },
   async gravar(chave: string, valor: unknown): Promise<void> {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem(PREFIXO_LOCAL + chave, JSON.stringify(valor));
-      definirArmazenamentoLocalCheio(false);
-    } catch {
-      /* armazenamento indisponível (cheio) — aviso global cobre isso */
-      definirArmazenamentoLocalCheio(true);
-    }
+    gravarRawCache(PREFIXO_LOCAL + chave, JSON.stringify(valor));
   },
   async remover(chave: string): Promise<void> {
     if (typeof window === 'undefined') return;
-    try {
-      localStorage.removeItem(PREFIXO_LOCAL + chave);
-    } catch {
-      /* ignore */
-    }
+    removerRawCache(PREFIXO_LOCAL + chave);
   },
   async listarChaves(): Promise<string[]> {
     if (typeof window === 'undefined') return [];
-    const out: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith(PREFIXO_LOCAL)) out.push(k.slice(PREFIXO_LOCAL.length));
-    }
-    return out;
+    return listarChavesCache(PREFIXO_LOCAL).map((k) => k.slice(PREFIXO_LOCAL.length));
   },
 };
 
