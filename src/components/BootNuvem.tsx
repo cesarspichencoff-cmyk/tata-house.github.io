@@ -231,15 +231,19 @@ export function BootNuvem() {
                 definirStatusNuvem('erro');
                 return;
               }
-              if (outboxDuravel) {
-                try {
-                  await removerOutbox(k);
-                } catch {
-                  pendentesConhecidos.add(k);
-                  atualizarFilaVisual();
-                  definirStatusNuvem('erro');
-                  return;
-                }
+              // upload final confirmado invalida qualquer outbox anterior.
+              // Mesmo que salvarOutbox() desta revisão tenha falhado, pode
+              // existir no IndexedDB um payload MAIS ANTIGO da mesma chave.
+              // Deixá-lo ali faria o próximo reload ressuscitar uma pendência
+              // velha. Portanto a limpeza é obrigatória após confirmação da
+              // revisão final; se a remoção não for confirmada, ficamos em erro.
+              try {
+                await removerOutbox(k);
+              } catch {
+                pendentesConhecidos.add(k);
+                atualizarFilaVisual();
+                definirStatusNuvem('erro');
+                return;
               }
               pendentesConhecidos.delete(k);
 
