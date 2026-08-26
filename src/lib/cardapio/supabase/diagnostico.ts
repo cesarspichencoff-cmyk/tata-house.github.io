@@ -6,6 +6,9 @@ import {
   ehChaveEstadoGrande,
 } from '../estado-grande-merge';
 import { serializarCanonico } from '../sync-util';
+import { diagnosticarIdb } from '../idb';
+import { diagnosticarOutbox } from '../sync-outbox';
+import { diagnosticarEstadoGrandeLocal } from '../estado-grande';
 import { supabaseConfig, supabaseHabilitado, ESPACO_DADOS, PREFIXO_LOCAL } from './config';
 import { getSupabase } from './client';
 
@@ -127,6 +130,22 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
     } catch { /* opcional */ }
   }
 
+  const idb = await diagnosticarIdb();
+  itens.push({
+    titulo: 'Persistencia IndexedDB',
+    veredito: idb.ok ? 'ok' : 'falha',
+    detalhe: idb.ok
+      ? 'Write/read/delete confirmados. O cache duravel e a outbox sobrevivem ao fechamento da aba.'
+      : 'Falhou a prova local (gravar: ' + (idb.gravacao ? 'ok' : 'falha') + ' · ler: ' + (idb.leitura ? 'ok' : 'falha') + ' · remover: ' + (idb.remocao ? 'ok' : 'falha') + ').',
+  });
+
+  const outbox = await diagnosticarOutbox();
+  itens.push({
+    titulo: 'Outbox offline',
+    veredito: outbox.falhas.length > 0 ? 'falha' : outbox.memoria === outbox.persistidos ? 'ok' : 'aviso',
+    detalhe: outbox.memoria + ' em memoria · ' + outbox.persistidos + ' persistida(s) no IndexedDB' + (outbox.falhas.length ? ' · falha em: ' + outbox.falhas.join(', ') : '') + '.',
+  });
+
   if (!supabaseHabilitado()) {
     itens.push({
       titulo: 'Configuração da nuvem neste site',
@@ -216,12 +235,18 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
     const temHistV2 = remoto.has(CHAVE_HISTORICO_V2);
     const legadoAudLocal = local.valores.has('auditoria');
     const legadoHistLocal = local.valores.has('historicoPrecos');
+    const grande = await diagnosticarEstadoGrandeLocal();
+    const audIgual = temAudV2 && serializarCanonico(grande.auditoria) === serializarCanonico(remoto.get(CHAVE_AUDITORIA_V2));
+    const histIgual = temHistV2 && serializarCanonico(grande.historico) === serializarCanonico(remoto.get(CHAVE_HISTORICO_V2));
+    const persistenciaGrande = grande.persistenciaOk;
+    const convergiu = grande.pendentes === 0 && audIgual && histIgual;
     itens.push({
       titulo: 'Estados grandes (quota)',
-      veredito: temAudV2 && temHistV2 && !legadoAudLocal && !legadoHistLocal ? 'ok' : 'aviso',
+      veredito: !persistenciaGrande ? 'falha' : convergiu && !legadoAudLocal && !legadoHistLocal ? 'ok' : 'aviso',
       detalhe:
-        `auditoria.v2: ${temAudV2 ? 'na nuvem' : 'ausente'} · historicoPrecos.v2: ${temHistV2 ? 'na nuvem' : 'ausente'} · ` +
-        `legado local: auditoria ${legadoAudLocal ? 'presente' : 'removida'}, histórico ${legadoHistLocal ? 'presente' : 'removido'}.`,
+        'IDB: ' + (persistenciaGrande ? 'confirmado' : 'FALHOU') + ' · pendentes: ' + grande.pendentes + ' · ' +
+        'auditoria.v2 local=nuvem: ' + (audIgual ? 'sim' : 'nao') + ' · historicoPrecos.v2 local=nuvem: ' + (histIgual ? 'sim' : 'nao') + ' · ' +
+        'legado local: auditoria ' + (legadoAudLocal ? 'presente' : 'removida') + ', historico ' + (legadoHistLocal ? 'presente' : 'removido') + '.',
     });
   }
 

@@ -43,7 +43,8 @@ let legadoAuditoriaLocal = false;
 let legadoHistoricoLocal = false;
 let remotoLiberado = false;
 let inicializacao: Promise<void> | null = null;
-let filaPersistencia: Promise<void> = Promise.resolve();
+let filaPersistencia: Promise<boolean> = Promise.resolve(true);
+let falhaPersistenciaLocal: string | null = null;
 let timerFlush: ReturnType<typeof setTimeout> | null = null;
 let flushEmAndamento: Promise<void> | null = null;
 
@@ -65,11 +66,17 @@ function lerLocalJson(chave: string): unknown {
   }
 }
 
-function persistirEstadoAtual(): Promise<void> {
-  filaPersistencia = filaPersistencia.then(async () => {
-    await idbGravar('estado', CHAVE_AUDITORIA_V2, auditoria);
-    await idbGravar('estado', CHAVE_HISTORICO_V2, historico);
-    await idbGravar('estado', CHAVE_PENDENTES, Array.from(pendentes));
+function persistirEstadoAtual(): Promise<boolean> {
+  filaPersistencia = filaPersistencia.catch(() => false).then(async () => {
+    const [okAud, okHist, okPend] = await Promise.all([
+      idbGravar('estado', CHAVE_AUDITORIA_V2, auditoria),
+      idbGravar('estado', CHAVE_HISTORICO_V2, historico),
+      idbGravar('estado', CHAVE_PENDENTES, Array.from(pendentes)),
+    ]);
+    const ok = okAud && okHist && okPend;
+    falhaPersistenciaLocal = ok ? null : 'IndexedDB nao confirmou o estado grande local';
+    if (!ok) definirStatusNuvem('erro');
+    return ok;
   });
   return filaPersistencia;
 }
@@ -110,7 +117,8 @@ function temHistorico(): boolean {
 
 async function limparLegadosConfirmados() {
   if (typeof window === 'undefined') return;
-  await persistirEstadoAtual();
+  const persistiu = await persistirEstadoAtual();
+  if (!persistiu) return;
 
   let removeu = false;
   try {
@@ -388,6 +396,29 @@ export async function liberarEstadoGrandeParaNuvem(chavesNuvem: string[]): Promi
 
   remotoLiberado = true;
   await reenviarEstadoGrandePendente();
+}
+
+export async function diagnosticarEstadoGrandeLocal() {
+  await inicializarEstadoGrandeLocal();
+  const persistiuAgora = await persistirEstadoAtual();
+  const [audIdb, histIdb, pendIdb] = await Promise.all([
+    idbLer<unknown>('estado', CHAVE_AUDITORIA_V2, null),
+    idbLer<unknown>('estado', CHAVE_HISTORICO_V2, null),
+    idbLer<unknown>('estado', CHAVE_PENDENTES, []),
+  ]);
+  const auditoriaPersistida = ehAuditoriaV2(audIdb) && serializarCanonico(audIdb) === serializarCanonico(auditoria);
+  const historicoPersistido = ehHistoricoV2(histIdb) && serializarCanonico(histIdb) === serializarCanonico(historico);
+  const pendentesPersistidos = Array.isArray(pendIdb) && serializarCanonico([...pendIdb].sort()) === serializarCanonico(Array.from(pendentes).sort());
+  return {
+    auditoria,
+    historico,
+    pendentes: pendentes.size,
+    auditoriaPersistida,
+    historicoPersistido,
+    pendentesPersistidos,
+    persistenciaOk: persistiuAgora && auditoriaPersistida && historicoPersistido && pendentesPersistidos && !falhaPersistenciaLocal,
+    falhaPersistenciaLocal,
+  };
 }
 
 export function estadoGrandePendente(): number {

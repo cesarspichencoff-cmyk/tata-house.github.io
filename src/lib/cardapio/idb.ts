@@ -62,18 +62,18 @@ export async function idbGravar(loja: LojaIdb, chave: IDBValidKey, valor: unknow
   });
 }
 
-export async function idbRemover(loja: LojaIdb, chave: IDBValidKey): Promise<void> {
+export async function idbRemover(loja: LojaIdb, chave: IDBValidKey): Promise<boolean> {
   const db = await abrirDb();
-  if (!db) return;
-  await new Promise<void>((resolve) => {
+  if (!db) return false;
+  return new Promise<boolean>((resolve) => {
     try {
       const tx = db.transaction(loja, 'readwrite');
       tx.objectStore(loja).delete(chave);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
     } catch {
-      resolve();
+      resolve(false);
     }
   });
 }
@@ -99,4 +99,21 @@ export async function idbTodos<T>(loja: LojaIdb): Promise<T[]> {
       resolve(out);
     }
   });
+}
+
+export interface DiagnosticoIdb {
+  ok: boolean;
+  gravacao: boolean;
+  leitura: boolean;
+  remocao: boolean;
+}
+
+export async function diagnosticarIdb(): Promise<DiagnosticoIdb> {
+  const chave = '__diagnostico_idb__';
+  const token = 'tata-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  const gravacao = await idbGravar('estado', chave, token);
+  if (!gravacao) return { ok: false, gravacao: false, leitura: false, remocao: false };
+  const leitura = (await idbLer<string | null>('estado', chave, null)) === token;
+  const remocao = await idbRemover('estado', chave);
+  return { ok: gravacao && leitura && remocao, gravacao, leitura, remocao };
 }

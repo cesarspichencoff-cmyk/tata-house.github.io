@@ -32,7 +32,9 @@ import {
 } from '@/lib/cardapio/estado-grande';
 import { ehChaveEstadoGrande } from '@/lib/cardapio/estado-grande-merge';
 import { inicializarOutbox, listarOutbox, removerOutbox, salvarOutbox } from '@/lib/cardapio/sync-outbox';
-import { adicionarEcoRecente, ehEcoProprio, type EcoRecente } from '@/lib/cardapio/sync-util';
+import { adicionarEcoRecente, ehEcoProprio, serializarCanonico, type EcoRecente } from '@/lib/cardapio/sync-util';
+import { ehChaveConcorrente, mesclarDocumentoConcorrente } from '@/lib/cardapio/sync-concorrente';
+import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
 import {
@@ -134,39 +136,103 @@ export function BootNuvem() {
     const pendentesConhecidos = new Set<string>(lerPendentesLegado());
     const revisoes = new Map<string, number>();
     const filasPorChave = new Map<string, Promise<void>>();
+    const basesConcorrentes = new Map<string, unknown>();
 
     const atualizarFilaVisual = () => {
       definirPendentesNuvem(pendentesConhecidos.size, 'boot');
     };
 
-    // Enfileira por CHAVE para preservar ordem. Antes de tocar na rede, o
-    // payload mais novo já está no IndexedDB: quota cheia + wifi caído deixa
-    // de ser um buraco onde a alteração simplesmente desaparece.
-    const subir = (k: string, valor: unknown): Promise<void> => {
+    const marcarPendenteLegado = (k: string, pendente: boolean): boolean => {
+      const atual = lerPendentesLegado();
+      if (!pendente && !atual.includes(k)) return true;
+      const arr = atual.filter((x) => x !== k);
+      if (pendente) arr.push(k);
+      try {
+        orig(PREFIXO + PENDENTES, JSON.stringify(arr));
+        return true;
+      } catch {
+        definirArmazenamentoLocalCheio(true);
+        return false;
+      }
+    };
+
+    // Enfileira por CHAVE. A persistencia da outbox faz parte da prova.
+    const subir = (k: string, valor: unknown, baseHint?: unknown): Promise<void> => {
       const revisao = (revisoes.get(k) ?? 0) + 1;
       revisoes.set(k, revisao);
       pendentesConhecidos.add(k);
       atualizarFilaVisual();
       definirStatusNuvem('sincronizando');
 
-      const duravel = salvarOutbox(k, valor);
       const anterior = filasPorChave.get(k) ?? Promise.resolve();
-
       const tarefa = anterior
         .catch(() => {})
         .then(async () => {
-          await duravel;
-          recentes.set(k, adicionarEcoRecente(recentes.get(k), valor));
+          let outboxDuravel = true;
           try {
-            await armazenamentoSupabase.gravar(k, valor);
+            await salvarOutbox(k, valor, baseHint);
+          } catch {
+            outboxDuravel = false;
+            marcarPendenteLegado(k, true);
+            definirStatusNuvem('erro');
+          }
+
+          let valorEnviar = valor;
+          try {
+            if (ehChaveConcorrente(k)) {
+              const remoto = await armazenamentoSupabase.ler<unknown>(k, null);
+              const base = baseHint !== undefined
+                ? baseHint
+                : (basesConcorrentes.has(k) ? basesConcorrentes.get(k) : remoto);
+              const mescla = mesclarDocumentoConcorrente(base, valor, remoto);
+              if (mescla.conflitos.length > 0) {
+                pendentesConhecidos.add(k);
+                atualizarFilaVisual();
+                definirStatusNuvem('erro');
+                return;
+              }
+              valorEnviar = mescla.valor;
+            }
+
+            recentes.set(k, adicionarEcoRecente(recentes.get(k), valorEnviar));
+            await armazenamentoSupabase.gravar(k, valorEnviar);
+
             if (revisoes.get(k) === revisao) {
+              if (outboxDuravel) {
+                try {
+                  await removerOutbox(k);
+                } catch {
+                  pendentesConhecidos.add(k);
+                  atualizarFilaVisual();
+                  definirStatusNuvem('erro');
+                  return;
+                }
+              }
+              marcarPendenteLegado(k, false);
               pendentesConhecidos.delete(k);
-              await removerOutbox(k);
+
+              if (ehChaveConcorrente(k)) {
+                basesConcorrentes.set(k, valorEnviar);
+                const canon = serializarCanonico(valorEnviar);
+                try {
+                  const raw = localStorage.getItem(PREFIXO + k);
+                  const localAtual = raw == null ? null : JSON.parse(raw);
+                  if (serializarCanonico(localAtual) !== canon) {
+                    orig(PREFIXO + k, JSON.stringify(valorEnviar));
+                    notificarChaveExterna(k);
+                  }
+                } catch {
+                  definirArmazenamentoLocalCheio(true);
+                }
+              }
             }
           } catch {
             if (revisoes.get(k) === revisao) {
               pendentesConhecidos.add(k);
-              await salvarOutbox(k, valor);
+              if (!outboxDuravel) {
+                marcarPendenteLegado(k, true);
+                try { await salvarOutbox(k, valor, baseHint); } catch { /* segue nao duravel */ }
+              }
               definirStatusNuvem('erro');
             }
           } finally {
@@ -191,25 +257,29 @@ export function BootNuvem() {
       void listarOutbox().then((itens) => {
         for (const item of itens) {
           pendentesConhecidos.add(item.chave);
-          if (!filasPorChave.has(item.chave)) void subir(item.chave, item.valor);
+          if (!filasPorChave.has(item.chave)) void subir(item.chave, item.valor, item.base);
         }
         atualizarFilaVisual();
       });
     };
 
-    // Migra a lista __pending das versões antigas para a outbox v2.
+    // Migra __pending. So remove a marca antiga se TODAS as entradas forem
+    // confirmadas no IndexedDB. O flush espera a primeira leitura remota.
     void inicializarOutbox().then(async () => {
+      let migrouTudo = true;
       for (const k of lerPendentesLegado()) {
         const raw = localStorage.getItem(PREFIXO + k);
         if (raw == null) continue;
-        try { await salvarOutbox(k, JSON.parse(raw)); } catch { /* não-JSON */ }
+        try { await salvarOutbox(k, JSON.parse(raw)); } catch { migrouTudo = false; }
       }
-      try { localStorage.removeItem(PREFIXO + PENDENTES); } catch { /* ignore */ }
+      if (migrouTudo) {
+        try { localStorage.removeItem(PREFIXO + PENDENTES); } catch { /* ignore */ }
+      }
       const itens = await listarOutbox();
       pendentesConhecidos.clear();
       itens.forEach((x) => pendentesConhecidos.add(x.chave));
+      for (const k of lerPendentesLegado()) pendentesConhecidos.add(k);
       atualizarFilaVisual();
-      flush();
     });
 
     // 1) Espelha toda gravação local (cardapio.v1.*) na nuvem.
@@ -217,6 +287,14 @@ export function BootNuvem() {
       localStorage.setItem = (chave: string, valor: string) => {
         const ehTata = typeof chave === 'string' && chave.startsWith(PREFIXO);
         const k = ehTata ? chave.slice(PREFIXO.length) : '';
+        let valorAnterior: unknown = undefined;
+        if (ehTata && ehChaveConcorrente(k)) {
+          try {
+            const rawAnterior = localStorage.getItem(chave);
+            valorAnterior = rawAnterior == null ? null : JSON.parse(rawAnterior);
+            if (!basesConcorrentes.has(k)) basesConcorrentes.set(k, valorAnterior);
+          } catch { valorAnterior = undefined; }
+        }
 
         if (ehTata && ehChaveEstadoGrande(k)) {
           // Compatibilidade defensiva: código antigo que ainda tente escrever
@@ -238,7 +316,7 @@ export function BootNuvem() {
 
         if (ehTata && !k.startsWith('__')) {
           try {
-            subir(k, JSON.parse(valor));
+            subir(k, JSON.parse(valor), ehChaveConcorrente(k) ? basesConcorrentes.get(k) : undefined);
           } catch {
             /* valor não-JSON: fica apenas local (ex.: chave Groq/texto bruto) */
           }
@@ -307,6 +385,39 @@ export function BootNuvem() {
         return false;
       }
       if (chave.startsWith('semana.')) return aplicarSemana(chave, valorNuvem as EstadoSemana);
+      if (ehChaveConcorrente(chave)) {
+        let localAtual: unknown = null;
+        try {
+          const raw = localStorage.getItem(PREFIXO + chave);
+          localAtual = raw == null ? null : JSON.parse(raw);
+        } catch { localAtual = null; }
+
+        if (!basesConcorrentes.has(chave)) {
+          if (pendentesConhecidos.has(chave)) return false;
+          basesConcorrentes.set(chave, valorNuvem);
+        } else {
+          const mescla = mesclarDocumentoConcorrente(basesConcorrentes.get(chave), localAtual, valorNuvem);
+          if (mescla.conflitos.length > 0) {
+            pendentesConhecidos.add(chave);
+            atualizarFilaVisual();
+            definirStatusNuvem('erro');
+            return false;
+          }
+          basesConcorrentes.set(chave, valorNuvem);
+          const novoMesclado = JSON.stringify(mescla.valor);
+          if (novoMesclado !== localStorage.getItem(PREFIXO + chave)) {
+            try {
+              orig(PREFIXO + chave, novoMesclado);
+              notificarChaveExterna(chave);
+            } catch { definirArmazenamentoLocalCheio(true); }
+          }
+          if (serializarCanonico(mescla.valor) !== serializarCanonico(valorNuvem)) {
+            void subir(chave, mescla.valor, valorNuvem);
+          }
+          return true;
+        }
+      }
+      if (pendentesConhecidos.has(chave)) return false;
       const novo = JSON.stringify(valorNuvem);
       if (novo !== localStorage.getItem(PREFIXO + chave)) {
         orig(PREFIXO + chave, novo); // grava sem reenviar à nuvem
