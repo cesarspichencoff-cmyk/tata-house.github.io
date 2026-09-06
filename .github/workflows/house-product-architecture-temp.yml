@@ -19,6 +19,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - name: Align current source anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/page.tsx')
+          text = p.read_text(encoding='utf-8')
+          old = "] as const;\n\ntype AbaId = (typeof ABAS)[number]['id'];"
+          new = "] as const;\ntype AbaId = (typeof ABAS)[number]['id'];"
+          if text.count(old) != 1:
+              raise SystemExit(f'ABAS anchor: expected 1, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Apply fail-closed product architecture patch
         run: python3 .github/scripts/house_product_architecture_patch.py
       - name: Verify information architecture
