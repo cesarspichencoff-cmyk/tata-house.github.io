@@ -68,8 +68,26 @@ describe('governanca-outbox', () => {
       voto: 'bom',
       comentario: 'Muito bom',
     });
+    expect(evento?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(listarPendenciasGovernanca()).toHaveLength(1);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('mantém UUID v4 mesmo sem crypto.randomUUID', () => {
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        for (let i = 0; i < bytes.length; i += 1) bytes[i] = i + 1;
+        return bytes;
+      },
+    });
+
+    const evento = registrarAvaliacaoGovernancaPendente({
+      data: new Date(2026, 8, 5),
+      prato: 'Prato fallback',
+      voto: 'ok',
+    });
+
+    expect(evento?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   });
 
   it('confirma somente IDs explicitamente aceitos', () => {

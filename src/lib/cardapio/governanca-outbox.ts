@@ -133,15 +133,36 @@ function eventoGovernancaValido(v: unknown): v is EventoAvaliacaoGovernancaV1 {
   );
 }
 
+function uuidV4Fallback(): string {
+  const bytes = new Uint8Array(16);
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      crypto.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+    }
+  } catch {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+
+  // RFC 4122 v4. O contrato continua aceitando IDs legados já persistidos,
+  // mas todo evento NOVO nasce em formato UUID para manter identidade estável
+  // entre retries e ser compatível com operation_id do TATÁ OS.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const h = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 function idEvento(): string {
   try {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
     }
   } catch {
-    // fallback abaixo
+    // fallback UUID abaixo
   }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return uuidV4Fallback();
 }
 
 export function dataLocalIso(data: Date): string {
