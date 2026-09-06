@@ -94,5 +94,20 @@ describe('governanca-cardapio', () => {
         salada: '',
       }),
     ).toBeNull();
+
+    expect(
+      salvarSnapshotCardapioGovernancaLocal({
+        contrato: 'tata-house-governanca',
+        versao: 1,
+        tipo: 'cardapio.dia',
+        origem: 'governanca',
+        atualizadoEm: '2026-09-05',
+        data: '2026-09-05',
+        unidade: 'tata-house',
+        principal: 'Frango',
+        guarnicao: '',
+        salada: '',
+      }),
+    ).toBeNull();
   });
 });
