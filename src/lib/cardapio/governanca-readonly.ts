@@ -3,6 +3,7 @@
 import { normalizar } from './motor';
 
 export const GOV_PLANEJADOR_EVIDENCIA_V1 = 'tata-house:governanca:planejador:evidencia:v1' as const;
+export const GOV_PLANEJADOR_EVIDENCIA_READY_V1 = 'tata-house:governanca:planejador:evidencia:ready:v1' as const;
 export const ORIGEM_GOVERNANCA_READONLY_V1 = 'https://lideres.tatasushi.tech' as const;
 
 const CONTRATO = 'tata-house-governanca-readonly' as const;
@@ -204,5 +205,14 @@ export function instalarHandoffEvidenciaReadOnly(opcoes: {
     if (evidencia) opcoes.aoEvidencia(evidencia);
   };
   window.addEventListener('message', aoReceber);
+
+  const ready = { type: GOV_PLANEJADOR_EVIDENCIA_READY_V1, versao: 1 };
+  try {
+    window.opener?.postMessage(ready, ORIGEM_GOVERNANCA_READONLY_V1);
+  } catch {}
+  try {
+    if (window.parent !== window) window.parent.postMessage(ready, ORIGEM_GOVERNANCA_READONLY_V1);
+  } catch {}
+
   return () => window.removeEventListener('message', aoReceber);
 }
