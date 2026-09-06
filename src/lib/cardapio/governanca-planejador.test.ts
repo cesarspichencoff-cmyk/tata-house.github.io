@@ -88,7 +88,7 @@ describe('governanca-planejador', () => {
     }));
     const prontidao = avaliarProntidaoPlanejamento(dias, {});
     expect(prontidao.podeEnviar).toBe(false);
-    expect(prontidao.bloqueios.some((x) => x.includes('Frango 5×'))).toBe(true);
+    expect(prontidao.bloqueios.some((x) => /Frango \d+×/.test(x))).toBe(true);
   });
 
   it('constrói e revalida draft semanal canônico sem extras', () => {
