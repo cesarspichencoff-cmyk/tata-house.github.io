@@ -99,8 +99,10 @@ jobs:
             const apply=first.locator('button[data-testid^="aplicar-troca-"]');
             if(!(await apply.isDisabled()))throw new Error('apply must require human reason');
             console.log('TROCAS_E2E_REASON_REQUIRED=PASS');
-            const text=await first.innerText();
-            for(const label of ['Custo/ref.','Aceitação','Recente','Estoque','Impacto desta troca'])if(!text.includes(label))throw new Error('missing impact evidence '+label);
+            for(const label of ['Custo/ref.','Aceitação','Recente','Estoque']){
+              await first.getByText(label,{exact:true}).waitFor({state:'visible',timeout:5000});
+            }
+            await first.getByText('Impacto desta troca',{exact:true}).waitFor({state:'visible',timeout:5000});
             console.log('TROCAS_E2E_IMPACT_EVIDENCE=PASS');
 
             await frame.getByTestId('motivo-troca').selectOption('variedade');
@@ -117,7 +119,6 @@ jobs:
             if(!reg||reg.motivo!=='variedade')throw new Error('substitution learning record missing');
             console.log('TROCAS_E2E_APPLY_AND_LEARN=PASS');
 
-            // Injeta evidência operacional no dia seguinte e recarrega: a UI deve falhar fechada.
             await frame.evaluate(()=>{const k='cardapio.v1.semana.2026-S37',s=JSON.parse(localStorage.getItem(k));s.ajustes=s.ajustes||{};s.ajustes[1]={sal:{qtd:1}};localStorage.setItem(k,JSON.stringify(s));location.reload()});
             await page.waitForFunction(()=>window.__statuses.filter(x=>x.s==='contexto-confirmado').length>=2,null,{timeout:15000});
             const frame2=page.frames().find(f=>f.url().startsWith('https://tata-house.github.io/planejar'));
@@ -132,7 +133,6 @@ jobs:
             for(let i=0;i<await blockedButtons.count();i++)if(!(await blockedButtons.nth(i).isDisabled()))throw new Error('evidence-linked day allowed auto swap');
             console.log('TROCAS_E2E_OPERATIONAL_EVIDENCE_BLOCK=PASS');
 
-            // Remove somente a evidência sintética do harness para comprovar que o fluxo de envio segue íntegro.
             await frame2.evaluate(()=>{const k='cardapio.v1.semana.2026-S37',s=JSON.parse(localStorage.getItem(k));delete s.ajustes[1];localStorage.setItem(k,JSON.stringify(s));location.reload()});
             await page.waitForFunction(()=>window.__statuses.filter(x=>x.s==='contexto-confirmado').length>=3,null,{timeout:15000});
             const frame3=page.frames().find(f=>f.url().startsWith('https://tata-house.github.io/planejar'));
