@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   lerCardapioGovernancaLocal,
   salvarCardapioGovernancaLocal,
+  salvarSnapshotCardapioGovernancaLocal,
 } from './governanca-cardapio';
 
 function memoriaStorage(): Storage {
@@ -66,12 +67,32 @@ describe('governanca-cardapio', () => {
     expect(lerCardapioGovernancaLocal(new Date(2026, 8, 5), 'outra-unidade')).toBeNull();
   });
 
-  it('rejeita snapshot sem data válida ou prato principal', () => {
+  it('rejeita data textual inválida, data impossível ou prato principal vazio', () => {
     expect(
       salvarCardapioGovernancaLocal({ data: '05/09/2026', principal: 'Frango' }),
     ).toBeNull();
     expect(
+      salvarCardapioGovernancaLocal({ data: '2026-02-31', principal: 'Frango' }),
+    ).toBeNull();
+    expect(
       salvarCardapioGovernancaLocal({ data: '2026-09-05', principal: '   ' }),
+    ).toBeNull();
+  });
+
+  it('rejeita snapshot de fronteira que não satisfaz o contrato v1 completo', () => {
+    expect(
+      salvarSnapshotCardapioGovernancaLocal({
+        contrato: 'tata-house-governanca',
+        versao: 1,
+        tipo: 'cardapio.dia',
+        origem: 'governanca',
+        atualizadoEm: '2026-09-05T15:00:00.000Z',
+        data: '2026-09-05',
+        unidade: 'tata-house',
+        principal: 'Frango',
+        guarnicao: 123,
+        salada: '',
+      }),
     ).toBeNull();
   });
 });
