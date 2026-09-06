@@ -1,0 +1,35 @@
+name: TATÁ House trocas inteligentes V2 (temp)
+
+on:
+  push:
+    branches:
+      - feat/house-governanca-phase1
+    paths:
+      - 'src/lib/cardapio/governanca-trocas.ts'
+      - 'src/lib/cardapio/governanca-trocas.test.ts'
+      - 'src/components/cardapio/TrocaInteligenteGovernanca.tsx'
+      - 'src/components/cardapio/PlanejadorGovernanca.tsx'
+      - '.github/workflows/tatahouse-trocas-v2-temp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Focused tests
+        run: npx vitest run src/lib/cardapio/governanca-trocas.test.ts
+      - name: Full tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
