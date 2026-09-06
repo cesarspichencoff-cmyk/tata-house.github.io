@@ -14,6 +14,17 @@ export const VERSAO_CONTRATO_GOVERNANCA = 1 as const;
 
 const CHAVE_OUTBOX = 'tata.governanca.outbox.v1';
 const LIMITE_COMENTARIO = 1000;
+const CAMPOS_EVENTO = new Set([
+  'id',
+  'tipo',
+  'origem',
+  'criadoEm',
+  'data',
+  'unidade',
+  'prato',
+  'voto',
+  'comentario',
+]);
 
 export type VotoGovernanca = 'bom' | 'ok' | 'ruim';
 
@@ -60,7 +71,7 @@ function lerFila(storage = storageDisponivel()): EventoAvaliacaoGovernancaV1[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(eventoGovernancaValido);
+    return parsed.filter(eventoGovernancaValido).map((evento) => ({ ...evento }));
   } catch {
     return [];
   }
@@ -84,18 +95,40 @@ function votoValido(v: unknown): v is VotoGovernanca {
   return v === 'bom' || v === 'ok' || v === 'ruim';
 }
 
+function dataValida(v: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+function dataHoraValida(v: string): boolean {
+  return Boolean(v && !Number.isNaN(Date.parse(v)));
+}
+
 function eventoGovernancaValido(v: unknown): v is EventoAvaliacaoGovernancaV1 {
-  if (!v || typeof v !== 'object') return false;
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const chaves = Object.keys(v);
+  if (chaves.some((chave) => !CAMPOS_EVENTO.has(chave))) return false;
+
   const e = v as Partial<EventoAvaliacaoGovernancaV1>;
+  const comentarioValido =
+    e.comentario === undefined ||
+    (typeof e.comentario === 'string' && e.comentario.length <= LIMITE_COMENTARIO);
+
   return Boolean(
     texto(e.id) &&
       e.tipo === 'avaliacao.prato' &&
       e.origem === 'tata-house' &&
-      texto(e.criadoEm) &&
-      texto(e.data) &&
+      dataHoraValida(texto(e.criadoEm)) &&
+      dataValida(texto(e.data)) &&
       texto(e.unidade) &&
       texto(e.prato) &&
-      votoValido(e.voto),
+      votoValido(e.voto) &&
+      comentarioValido,
   );
 }
 
@@ -128,6 +161,8 @@ export function unidadeHouse(): string {
 export function registrarAvaliacaoGovernancaPendente(
   entrada: NovaAvaliacaoGovernanca,
 ): EventoAvaliacaoGovernancaV1 | null {
+  if (Number.isNaN(entrada.data.getTime())) return null;
+
   const prato = entrada.prato.trim();
   if (!prato) return null;
 
@@ -143,6 +178,8 @@ export function registrarAvaliacaoGovernancaPendente(
     voto: entrada.voto,
     ...(comentario ? { comentario } : {}),
   };
+
+  if (!eventoGovernancaValido(evento)) return null;
 
   const fila = lerFila();
   if (!gravarFila([...fila, evento])) return null;
