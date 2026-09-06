@@ -1,0 +1,196 @@
+name: House responsive product architecture audit v2
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+
+permissions:
+  contents: write
+
+jobs:
+  visual-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build audited feature
+        run: |
+          npm ci
+          npm run build
+        env:
+          NEXT_PUBLIC_EMAILJS_SERVICE_ID: house-visual-audit
+          NEXT_PUBLIC_EMAILJS_TEMPLATE_ID: house-visual-audit
+          NEXT_PUBLIC_EMAILJS_PUBLIC_KEY: house-visual-audit
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: house-visual-audit
+          NEXT_PUBLIC_GEMINI_API_KEY: house-visual-audit
+          NEXT_PUBLIC_GROQ_KEY: house-visual-audit
+      - name: Install Chromium
+        run: |
+          mkdir -p /tmp/house-visual-v2
+          cd /tmp/house-visual-v2
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Start local static server
+        run: |
+          npx --yes serve@14 -s out -l 4173 >/tmp/house-visual-v2-server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/house-visual-v2-server.log
+          exit 1
+      - name: Audit desktop and mobile hierarchy
+        run: |
+          mkdir -p visual-audit-v2
+          cat > /tmp/house-visual-v2/audit.cjs <<'NODE'
+          const { chromium } = require('/tmp/house-visual-v2/node_modules/playwright');
+          const fs = require('fs');
+          const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
+          const q = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+          async function initPage(browser, viewport) {
+            const context = await browser.newContext({ viewport });
+            const page = await context.newPage();
+            await page.addInitScript(() => {
+              localStorage.setItem('cardapio.v1.login.perfil', JSON.stringify('gerencia'));
+              localStorage.setItem('cardapio.v1.papel', JSON.stringify('administrador'));
+              localStorage.setItem('tata:tour-completo', '1');
+            });
+            await page.goto('http://127.0.0.1:4173/', { waitUntil: 'domcontentloaded' });
+            await page.getByText('TATÁ HOUSE', { exact: true }).waitFor({ timeout: 15000 });
+            return { context, page };
+          }
+
+          async function noBodyOverflow(page, label) {
+            const d = await page.evaluate(() => ({
+              scrollWidth: document.documentElement.scrollWidth,
+              clientWidth: document.documentElement.clientWidth,
+            }));
+            assert(d.scrollWidth <= d.clientWidth + 2, `${label}: horizontal overflow ${JSON.stringify(d)}`);
+            console.log(`${label}_NO_BODY_OVERFLOW=PASS`, JSON.stringify(d));
+          }
+
+          async function desktop(browser) {
+            const { context, page } = await initPage(browser, { width: 1440, height: 1000 });
+            const sidebar = page.locator('aside');
+            for (const label of ['Hoje', 'Planejar', 'Abastecer', 'Analisar', 'Gestão']) {
+              await sidebar.getByRole('button', { name: label, exact: true }).waitFor();
+            }
+            await page.getByRole('heading', { name: 'Hoje', exact: true }).first().waitFor();
+            assert(await page.getByRole('button', { name: 'Pôster', exact: true }).count() === 0, 'Hoje: Pôster deve ser contextual');
+            await noBodyOverflow(page, 'DESKTOP_HOJE');
+            await page.screenshot({ path: 'visual-audit-v2/desktop-hoje.png', fullPage: true });
+
+            await sidebar.getByRole('button', { name: 'Planejar', exact: true }).click();
+            await page.getByRole('heading', { name: 'Planejamento', exact: true }).waitFor();
+            for (const tab of ['Planejamento', 'Execução', 'Feedback']) {
+              await page.getByRole('button', { name: tab, exact: true }).waitFor();
+            }
+            await page.getByRole('button', { name: 'Pôster', exact: true }).waitFor();
+            await page.getByRole('button', { name: 'QR de feedback', exact: true }).waitFor();
+            await page.getByText('Atalho operacional', { exact: true }).waitFor();
+            const criar = page.getByRole('button', { name: /Criar sugestão/ });
+            await criar.waitFor();
+            await criar.click();
+            for (const mode of ['Base histórica', 'Equilíbrio', 'Exploração', 'Personalizado']) {
+              await page.getByRole('button', { name: new RegExp('^' + q(mode)) }).waitFor();
+            }
+            await noBodyOverflow(page, 'DESKTOP_PLANEJAR');
+            await page.screenshot({ path: 'visual-audit-v2/desktop-planejar.png', fullPage: true });
+
+            await sidebar.getByRole('button', { name: 'Abastecer', exact: true }).click();
+            await page.getByRole('heading', { name: 'Compras e estoque', exact: true }).waitFor();
+            for (const tab of ['Necessidades', 'Estoque', 'Notas fiscais', 'Fornecedores', 'Pedidos']) {
+              await page.getByRole('button', { name: tab, exact: true }).waitFor();
+            }
+            assert(await page.getByRole('button', { name: 'Pôster', exact: true }).count() === 0, 'Abastecer: Pôster deve ser contextual');
+            await noBodyOverflow(page, 'DESKTOP_ABASTECER');
+            await page.screenshot({ path: 'visual-audit-v2/desktop-abastecer.png', fullPage: true });
+
+            await sidebar.getByRole('button', { name: 'Analisar', exact: true }).click();
+            await page.getByRole('heading', { name: 'Resultados', exact: true }).waitFor();
+            for (const tab of ['Resumo', 'Custos', 'Qualidade & DNA', 'Previsão', 'Fornecedores', 'Gastos', 'Auditoria']) {
+              await page.getByRole('button', { name: tab, exact: true }).waitFor();
+            }
+            await noBodyOverflow(page, 'DESKTOP_ANALISAR');
+            await page.screenshot({ path: 'visual-audit-v2/desktop-analisar.png', fullPage: true });
+
+            await sidebar.getByRole('button', { name: 'Gestão', exact: true }).click();
+            await page.getByRole('heading', { name: 'Gestão do House', exact: true }).waitFor();
+            await page.getByText('Pessoas e restrições', { exact: true }).first().waitFor();
+            await page.getByText('Acessos e permissões', { exact: true }).first().waitFor();
+            await noBodyOverflow(page, 'DESKTOP_GESTAO');
+            await page.screenshot({ path: 'visual-audit-v2/desktop-gestao.png', fullPage: true });
+            console.log('DESKTOP_PRODUCT_ARCHITECTURE=PASS');
+            await context.close();
+          }
+
+          async function mobile(browser) {
+            const { context, page } = await initPage(browser, { width: 390, height: 844 });
+            const nav = page.locator('nav').last();
+            const boxes = [];
+            for (const label of ['Hoje', 'Planejar', 'Abastecer', 'Analisar', 'Gestão']) {
+              const button = nav.getByRole('button', { name: label, exact: true });
+              await button.waitFor();
+              const box = await button.boundingBox();
+              assert(box, `mobile: caixa ausente para ${label}`);
+              boxes.push({ label, ...box });
+            }
+            for (let i = 1; i < boxes.length; i++) {
+              assert(boxes[i - 1].x + boxes[i - 1].width <= boxes[i].x + 1, `mobile nav overlap: ${JSON.stringify(boxes)}`);
+            }
+            assert(boxes.every(b => b.x >= -1 && b.x + b.width <= 391), `mobile nav fora da viewport: ${JSON.stringify(boxes)}`);
+            console.log('MOBILE_NAV_GEOMETRY=PASS', JSON.stringify(boxes));
+            await noBodyOverflow(page, 'MOBILE_HOJE');
+            await page.screenshot({ path: 'visual-audit-v2/mobile-hoje.png', fullPage: true });
+
+            await nav.getByRole('button', { name: 'Planejar', exact: true }).click();
+            await page.getByRole('heading', { name: 'Planejamento', exact: true }).waitFor();
+            await page.getByText('Atalho operacional', { exact: true }).waitFor();
+            await page.getByRole('button', { name: /Criar sugestão/ }).waitFor();
+            await noBodyOverflow(page, 'MOBILE_PLANEJAR');
+            await page.screenshot({ path: 'visual-audit-v2/mobile-planejar.png', fullPage: true });
+            console.log('MOBILE_PRODUCT_ARCHITECTURE=PASS');
+            await context.close();
+          }
+
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            try {
+              await desktop(browser);
+              await mobile(browser);
+              fs.writeFileSync('visual-audit-v2/result.txt', 'HOUSE_RESPONSIVE_PRODUCT_ARCHITECTURE=PASS\n');
+              console.log('HOUSE_RESPONSIVE_PRODUCT_ARCHITECTURE=PASS');
+            } finally {
+              await browser.close();
+            }
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+          node /tmp/house-visual-v2/audit.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: house-product-architecture-visual-audit-v2
+          path: |
+            visual-audit-v2
+            /tmp/house-visual-v2-server.log
+          if-no-files-found: warn
+      - name: Diff check
+        run: git diff --check
+      - name: Remove temporary visual audit
+        if: always()
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          rm -f .github/workflows/house-visual-audit-temp-v2.yml
+          git add .github/workflows/house-visual-audit-temp-v2.yml
+          git commit -m "test(house): remove temporary responsive visual audit v2"
+          git push origin HEAD:feat/house-governanca-phase1
