@@ -112,7 +112,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const { itensExtras, cadastrarItem } = useItensExtras();
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
-  const { historico } = useHistoricoPrecos();
+  const historico = useHistoricoPrecos();
 
   const prontidao = useMemo(
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
