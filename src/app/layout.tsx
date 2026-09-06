@@ -3,6 +3,7 @@ import { Fraunces, Manrope } from 'next/font/google';
 import './globals.css';
 import { BootNuvem } from '@/components/BootNuvem';
 import { AvisoCritico } from '@/components/AvisoCritico';
+import { GovernancaContexto } from '@/components/GovernancaContexto';
 
 const manrope = Manrope({
   subsets: ['latin'],
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="font-sans">
+        <GovernancaContexto />
         <BootNuvem />
         <AvisoCritico />
         {children}
