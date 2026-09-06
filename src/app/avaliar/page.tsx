@@ -17,6 +17,7 @@ import {
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
 import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';
+import { instalarHandoffCardapioGovernanca } from '@/lib/cardapio/governanca-handoff';
 import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
 
 type Voto = 'bom' | 'ok' | 'ruim';
@@ -115,7 +116,13 @@ export default function PaginaAvaliar() {
     };
 
     atualizar();
-    return assinarChaveExterna('semana.' + semanaId, atualizar);
+    const pararChaveExterna = assinarChaveExterna('semana.' + semanaId, atualizar);
+    const pararHandoff = instalarHandoffCardapioGovernanca(() => atualizar());
+
+    return () => {
+      pararChaveExterna();
+      pararHandoff();
+    };
   }, [semanaId, diaIdx]);
 
   const prato = cardapio?.principal;
