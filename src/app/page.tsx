@@ -85,14 +85,41 @@ import type { Etapa } from '@/lib/cardapio/tipos';
 /* ── abas ────────────────────────────────────────────────── */
 
 const ABAS = [
-  { id: 'agora',      rotulo: 'Início'     },
-  { id: 'cardapio',   rotulo: 'Cardápio'   },
-  { id: 'compras',    rotulo: 'Compras'    },
-  { id: 'relatorios', rotulo: 'Relatórios' },
-  { id: 'ajustes',    rotulo: 'Ajustes'    },
+  { id: 'agora',      rotulo: 'Hoje'      },
+  { id: 'cardapio',   rotulo: 'Planejar'  },
+  { id: 'compras',    rotulo: 'Abastecer' },
+  { id: 'relatorios', rotulo: 'Analisar'  },
+  { id: 'ajustes',    rotulo: 'Gestão'    },
 ] as const;
-
 type AbaId = (typeof ABAS)[number]['id'];
+
+const AREA_META: Record<AbaId, { kicker: string; titulo: string; descricao: string }> = {
+  agora: {
+    kicker: 'Visão da semana',
+    titulo: 'Hoje',
+    descricao: 'Prioridades, alertas e decisões que precisam de atenção agora.',
+  },
+  cardapio: {
+    kicker: 'Do plano à aprendizagem',
+    titulo: 'Planejamento',
+    descricao: 'Componha a semana, acompanhe a execução e feche o ciclo com feedback.',
+  },
+  compras: {
+    kicker: 'Abastecimento',
+    titulo: 'Compras e estoque',
+    descricao: 'Transforme o plano em necessidades, pedidos, recebimento e controle de estoque.',
+  },
+  relatorios: {
+    kicker: 'Leitura gerencial',
+    titulo: 'Resultados',
+    descricao: 'Entenda custo, aceitação, desperdício, tendências e oportunidades de melhoria.',
+  },
+  ajustes: {
+    kicker: 'Administração',
+    titulo: 'Gestão do House',
+    descricao: 'Organize pessoas, restrições e acessos sem misturar isso com a operação diária.',
+  },
+};
 
 /* ── badge de etapa ──────────────────────────────────────── */
 
@@ -182,17 +209,17 @@ function useBuscaGlobal(
   const { irPara } = acoes;
   // Ações (paleta de comando) — verbos que EXECUTAM, não só apontam
   const ACOES: { titulo: string; sub: string; chaves: string; run: () => void }[] = [
-    { titulo: 'Ir para o cardápio',       sub: 'Montar a semana',     chaves: 'gerar cardapio criar montar semana', run: () => irPara('cardapio') },
-    { titulo: 'Abrir cotação / preços',   sub: 'Catálogo de preços',  chaves: 'cotacao preco precos catalogo',      run: () => irPara('cardapio') },
-    { titulo: 'Lista de compras',         sub: 'Abrir compras',       chaves: 'lista compras comprar',              run: () => irPara('compras') },
-    { titulo: 'Estoque',                  sub: 'Saldos e mínimos',    chaves: 'estoque inventario saldo',           run: () => irPara('compras') },
-    { titulo: 'Gerar pedido',             sub: 'Pedido por fornecedor', chaves: 'pedido fornecedor encomenda',      run: () => irPara('compras') },
-    { titulo: 'Relatórios e exportação',  sub: 'DNA, custos, rankings', chaves: 'relatorio exportar csv dna ranking', run: () => irPara('relatorios') },
-    { titulo: 'Abrir pôster da semana',   sub: 'Arte para imprimir',  chaves: 'poster cartaz imprimir mural',       run: acoes.abrirPoster },
-    { titulo: 'Plaquinha de avaliação',   sub: 'QR para as mesas',    chaves: 'plaquinha qr avaliar mesa',          run: acoes.abrirPlaquinha },
-    { titulo: 'Duplicar semana anterior', sub: 'Copiar o cardápio',   chaves: 'duplicar copiar semana anterior',    run: acoes.duplicarSemana },
-    { titulo: 'Próxima semana',           sub: 'Avançar',             chaves: 'proxima semana avancar',             run: () => acoes.irSemana(1) },
-    { titulo: 'Semana anterior',          sub: 'Voltar',              chaves: 'anterior semana voltar',             run: () => acoes.irSemana(-1) },
+    { titulo: 'Abrir planejamento',       sub: 'Compor a semana',       chaves: 'gerar cardapio criar montar planejar semana', run: () => irPara('cardapio') },
+    { titulo: 'Revisar preços',           sub: 'Custos do planejamento', chaves: 'cotacao preco precos catalogo custo',         run: () => irPara('cardapio') },
+    { titulo: 'Ver necessidades',         sub: 'Lista para abastecimento', chaves: 'lista compras comprar necessidade',         run: () => irPara('compras') },
+    { titulo: 'Abrir estoque',            sub: 'Saldos e mínimos',       chaves: 'estoque inventario saldo',                   run: () => irPara('compras') },
+    { titulo: 'Preparar pedidos',         sub: 'Pedidos por fornecedor', chaves: 'pedido fornecedor encomenda',                run: () => irPara('compras') },
+    { titulo: 'Analisar resultados',      sub: 'Custos, qualidade e tendências', chaves: 'relatorio analisar exportar csv dna ranking', run: () => irPara('relatorios') },
+    { titulo: 'Abrir pôster da semana',   sub: 'Material de comunicação', chaves: 'poster cartaz imprimir mural',              run: acoes.abrirPoster },
+    { titulo: 'Abrir QR de feedback',     sub: 'Avaliação da refeição',  chaves: 'plaquinha qr avaliar mesa feedback',          run: acoes.abrirPlaquinha },
+    { titulo: 'Duplicar semana anterior', sub: 'Usar como ponto de partida', chaves: 'duplicar copiar semana anterior',         run: acoes.duplicarSemana },
+    { titulo: 'Próxima semana',           sub: 'Avançar',               chaves: 'proxima semana avancar',                      run: () => acoes.irSemana(1) },
+    { titulo: 'Semana anterior',          sub: 'Voltar',                chaves: 'anterior semana voltar',                      run: () => acoes.irSemana(-1) },
   ];
 
   return (termo: string): ResultadoBusca[] => {
@@ -271,10 +298,10 @@ const ICONE_TIPO: Record<ResultadoBusca['tipo'], React.ReactNode> = {
 
 const ROTULO_GRUPO: Record<ResultadoBusca['tipo'], string> = {
   acao:       'Ações',
-  cardapio:   'Cardápio',
-  compra:     'Compras',
+  cardapio:   'Planejamento',
+  compra:     'Abastecimento',
   fornecedor: 'Fornecedores',
-  relatorio:  'Relatórios',
+  relatorio:  'Análise',
 };
 
 const ORDEM_GRUPO: ResultadoBusca['tipo'][] = ['acao', 'cardapio', 'compra', 'fornecedor', 'relatorio'];
@@ -332,7 +359,7 @@ function BuscaGlobal({
             ref={inputRef}
             value={termo}
             onChange={(e) => setTermo(e.target.value)}
-            placeholder="Buscar cardápio, ingrediente, fornecedor, relatório…"
+            placeholder="Buscar planejamento, ingrediente, fornecedor, análise…"
             className="flex-1 bg-transparent text-subtitulo text-carvao-800 outline-none placeholder:text-texto-suave dark:text-areia-100"
           />
           {termo && (
@@ -533,6 +560,7 @@ export default function PaginaCardapios() {
     [abasPermitidas],
   );
   const grupoAtivo = GRUPOS.find((g) => g.abas.includes(aba)) ?? GRUPOS[0];
+  const areaMeta = AREA_META[aba];
 
   const irSemana = (delta: number) => setSemanaId(deslocarSemana(semanaId, delta));
   const irPara = (alvo: AbaId) => {
@@ -664,7 +692,7 @@ export default function PaginaCardapios() {
                 TATÁ&nbsp;HOUSE
               </div>
               <div className="hidden truncate text-micro font-semibold uppercase tracking-[0.28em] text-texto-suave sm:block">
-                Refeitório do Tatá Sushi
+                Refeitório · planejamento, operação e inteligência
               </div>
             </div>
           </div>
@@ -783,25 +811,37 @@ export default function PaginaCardapios() {
             >
               <Icone nome="proximo" tam={17} />
             </button>
-            <div className="mx-2 h-5 w-px bg-carvao-200 dark:bg-carvao-700" />
-            <button
-              onClick={() => setPosterAberto(true)}
-              className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-carvao-200 bg-white px-3 text-sm font-semibold text-carvao-600 transition hover:bg-carvao-50 dark:border-carvao-700 dark:bg-carvao-900 dark:text-areia-200"
-            >
-              <Icone nome="imagem" tam={16} />
-              <span className="hidden sm:inline">Pôster</span>
-            </button>
-            <button
-              onClick={() => setPlaquinhaAberta(true)}
-              className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-carvao-200 bg-white px-3 text-sm font-semibold text-carvao-600 transition hover:bg-carvao-50 dark:border-carvao-700 dark:bg-carvao-900 dark:text-areia-200"
-            >
-              <Icone nome="cotacao" tam={16} />
-              <span className="hidden sm:inline">Plaquinha</span>
-            </button>
           </div>
         </div>
 
         {/* Desktop: navegação na sidebar à esquerda. Mobile: BottomNav inferior. */}
+
+        {/* ── Contexto da área: uma hierarquia única para todo o produto ── */}
+        <section className="flex flex-col gap-3 rounded-2xl border border-carvao-100 bg-white px-4 py-4 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-micro font-bold uppercase tracking-[0.16em] text-brand-600 dark:text-brand-400">{areaMeta.kicker}</p>
+            <h2 className="mt-1 font-display text-xl font-bold text-carvao-900 dark:text-white sm:text-2xl">{areaMeta.titulo}</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-texto-suave">{areaMeta.descricao}</p>
+          </div>
+          {aba === 'cardapio' && (
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                onClick={() => setPosterAberto(true)}
+                className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-carvao-200 bg-white px-3 text-sm font-semibold text-carvao-600 transition hover:bg-carvao-50 dark:border-carvao-700 dark:bg-carvao-900 dark:text-areia-200"
+              >
+                <Icone nome="imagem" tam={16} /> Pôster
+              </button>
+              {podeAvaliar && (
+                <button
+                  onClick={() => setPlaquinhaAberta(true)}
+                  className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-carvao-200 bg-white px-3 text-sm font-semibold text-carvao-600 transition hover:bg-carvao-50 dark:border-carvao-700 dark:bg-carvao-900 dark:text-areia-200"
+                >
+                  <Icone nome="cotacao" tam={16} /> QR de feedback
+                </button>
+              )}
+            </div>
+          )}
+        </section>
 
         {/* ── Conteúdo ─────────────────────────────────────── */}
         {!pronto ? (
@@ -869,9 +909,9 @@ export default function PaginaCardapios() {
                 {/* Categorias — Montar / Operação / Avaliação */}
                 <div className="flex gap-4 border-b border-carvao-100 dark:border-carvao-800">
                   {([
-                    { id: 'montar' as const,    rotulo: 'Cardápio' },
-                    { id: 'operacao' as const,  rotulo: 'Operação' },
-                    ...(podeAvaliar ? [{ id: 'avaliacao' as const, rotulo: 'Avaliação' }] : []),
+                    { id: 'montar' as const,    rotulo: 'Planejamento' },
+                    { id: 'operacao' as const,  rotulo: 'Execução' },
+                    ...(podeAvaliar ? [{ id: 'avaliacao' as const, rotulo: 'Feedback' }] : []),
                   ]).map((seg) => (
                     <button
                       key={seg.id}
@@ -973,13 +1013,13 @@ export default function PaginaCardapios() {
                       }`}
                     >
                       {seg === 'lista' ? (
-                        <><span className="sm:hidden">Lista</span><span className="hidden sm:inline">Lista de compras</span></>
+                        <><span className="sm:hidden">Lista</span><span className="hidden sm:inline">Necessidades</span></>
                       ) : seg === 'estoque' ? 'Estoque'
                       : seg === 'nf' ? (
-                        <><span className="sm:hidden">NF</span><span className="hidden sm:inline">Nota fiscal</span></>
+                        <><span className="sm:hidden">NF</span><span className="hidden sm:inline">Notas fiscais</span></>
                       ) : seg === 'fornecedores' ? (
                         <><span className="sm:hidden">Forn.</span><span className="hidden sm:inline">Fornecedores</span></>
-                      ) : 'Pedido'}
+                      ) : 'Pedidos'}
                     </button>
                   ))}
                 </div>
@@ -1081,12 +1121,12 @@ export default function PaginaCardapios() {
                 {/* sub-abas por TEMA — navegação por assunto, não dump vertical */}
                 <div className="flex gap-1 overflow-x-auto rounded-2xl bg-carvao-100 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:bg-carvao-800">
                   {([
-                    { id: 'gerencial',    rotulo: 'Visão geral',   curto: 'Visão' },
-                    { id: 'custos',       rotulo: 'Custos',         curto: 'Custos' },
-                    { id: 'rankings',     rotulo: 'DNA & Rankings', curto: 'DNA' },
-                    { id: 'previsao',     rotulo: 'Previsão',       curto: 'Prev.' },
-                    { id: 'fornecedores', rotulo: 'Fornecedores',   curto: 'Forn.' },
-                    { id: 'gastos', rotulo: 'Gastos reais', curto: 'Gastos' },
+                    { id: 'gerencial',    rotulo: 'Resumo',          curto: 'Resumo' },
+                    { id: 'custos',       rotulo: 'Custos',          curto: 'Custos' },
+                    { id: 'rankings',     rotulo: 'Qualidade & DNA', curto: 'Qualid.' },
+                    { id: 'previsao',     rotulo: 'Previsão',        curto: 'Prev.' },
+                    { id: 'fornecedores', rotulo: 'Fornecedores',    curto: 'Forn.' },
+                    { id: 'gastos',       rotulo: 'Gastos',           curto: 'Gastos' },
                     ...(pode(papel, 'auditoria:ver') ? [{ id: 'auditoria', rotulo: 'Auditoria', curto: 'Audit.' }] : []),
                   ] as { id: typeof abaRelatorios; rotulo: string; curto: string }[]).map((s) => (
                     <button
@@ -1171,7 +1211,7 @@ export default function PaginaCardapios() {
             {aba === 'ajustes' && (
               <div className="space-y-8">
                 {/* Equipe e restrições alimentares */}
-                <SecaoAjuste titulo="Equipe e restrições alimentares">
+                <SecaoAjuste titulo="Pessoas e restrições">
                   <AbaFuncionarios
                     funcionarios={funcionarios}
                     dias={estado.dias}
@@ -1183,7 +1223,7 @@ export default function PaginaCardapios() {
 
                 {/* Configurações (PINs etc) — só gerência */}
                 {(papel === 'administrador' || papel === 'gestor') && (
-                  <SecaoAjuste titulo="Configurações de acesso">
+                  <SecaoAjuste titulo="Acessos e permissões">
                     <Configuracoes />
                   </SecaoAjuste>
                 )}

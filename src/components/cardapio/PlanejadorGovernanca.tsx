@@ -35,7 +35,7 @@ function EstadoConexao() {
     <main className="min-h-screen bg-areia-50 px-4 py-10 text-carvao-800 dark:bg-carvao-950 dark:text-areia-100">
       <div className="mx-auto max-w-xl rounded-3xl border border-carvao-100 bg-white p-7 shadow-sm dark:border-carvao-800 dark:bg-carvao-900">
         <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-brand-600">TATÁ House × Governança</p>
-        <h1 className="mt-3 font-display text-3xl font-bold tracking-tight">Planejador inteligente</h1>
+        <h1 className="mt-3 font-display text-3xl font-bold tracking-tight">Planejamento assistido</h1>
         <p className="mt-3 text-sm leading-6 text-texto-suave">
           Esta superfície só libera o planejamento depois de receber um contexto válido do Portal Líderes.
           Abra pelo módulo de Governança do TATÁ House.
@@ -178,7 +178,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
                 : 'text-carvao-500 hover:bg-carvao-50 dark:text-carvao-300 dark:hover:bg-carvao-800'
             }`}
           >
-            1. Montar semana
+            1. Compor semana
           </button>
           <button
             type="button"
@@ -189,14 +189,14 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
                 : 'text-carvao-500 hover:bg-carvao-50 dark:text-carvao-300 dark:hover:bg-carvao-800'
             }`}
           >
-            2. Decisão por dados
+            2. Validar decisão
           </button>
         </div>
 
         {aba === 'montar' ? (
           <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
             <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
-              Use Histórico, Mesclado, Novo ou Personalizado. O motor considera rotação, frequência, aceitação e preços disponíveis; depois você pode ajustar cada dia manualmente.
+              Escolha Base histórica, Equilíbrio, Exploração ou Personalizado. O motor considera rotação, frequência, aceitação e preços disponíveis; a decisão continua ajustável dia a dia.
             </div>
             <AbaCardapio
               estado={estado}
@@ -231,7 +231,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-texto-suave">Próxima etapa</p>
-              <h2 className="mt-1 text-lg font-bold">Enviar como rascunho para a Governança</h2>
+              <h2 className="mt-1 text-lg font-bold">Enviar proposta para revisão</h2>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-texto-suave">
                 Isso não publica nem aprova automaticamente. A Governança recebe uma proposta versionada para revisão humana.
               </p>
@@ -250,7 +250,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               disabled={!prontidao.podeEnviar || envio === 'enviando'}
               className="rounded-2xl bg-brand-600 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {envio === 'enviando' ? 'Enviando…' : 'Enviar para revisão'}
+              {envio === 'enviando' ? 'Enviando…' : 'Enviar proposta'}
             </button>
           </div>
         </section>

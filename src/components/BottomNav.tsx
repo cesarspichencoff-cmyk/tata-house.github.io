@@ -9,11 +9,11 @@ export interface Grupo {
 }
 
 export const GRUPOS: Grupo[] = [
-  { id: 'painel',   rotulo: 'Início',     abas: ['agora']      },
-  { id: 'cardapio', rotulo: 'Cardápio',   abas: ['cardapio']   },
-  { id: 'compras',  rotulo: 'Compras',    abas: ['compras']    },
-  { id: 'insights', rotulo: 'Relatórios', abas: ['relatorios'] },
-  { id: 'ajustes',  rotulo: 'Ajustes',    abas: ['ajustes']    },
+  { id: 'painel',   rotulo: 'Hoje',      abas: ['agora']      },
+  { id: 'cardapio', rotulo: 'Planejar',  abas: ['cardapio']   },
+  { id: 'compras',  rotulo: 'Abastecer', abas: ['compras']    },
+  { id: 'insights', rotulo: 'Analisar',  abas: ['relatorios'] },
+  { id: 'ajustes',  rotulo: 'Gestão',    abas: ['ajustes']    },
 ];
 
 export function BottomNav({

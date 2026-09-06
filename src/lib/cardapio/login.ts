@@ -50,7 +50,7 @@ export const PERFIS: DefPerfil[] = [
   {
     id: 'gerencia',
     rotulo: 'Gerência',
-    descricao: 'Acesso completo: início, cardápio, compras, relatórios e ajustes',
+    descricao: 'Acesso completo: hoje, planejamento, abastecimento, análise e gestão',
     icone: '',
     papel: 'administrador',
     abas: ['agora', 'cardapio', 'compras', 'relatorios', 'ajustes'],
@@ -59,7 +59,7 @@ export const PERFIS: DefPerfil[] = [
   {
     id: 'compras',
     rotulo: 'Compras',
-    descricao: 'Lista de compras, estoque e preços',
+    descricao: 'Abastecimento: necessidades, estoque, preços, notas e pedidos',
     icone: '',
     papel: 'compras',
     abas: ['compras', 'relatorios'],
@@ -68,7 +68,7 @@ export const PERFIS: DefPerfil[] = [
   {
     id: 'cozinha',
     rotulo: 'Cozinha / Conferência',
-    descricao: 'Cardápio, conferência, recebimento e feedback',
+    descricao: 'Execução: cardápio da semana, conferência, recebimento e feedback',
     icone: '',
     papel: 'cozinha',
     abas: ['agora', 'cardapio', 'compras'],

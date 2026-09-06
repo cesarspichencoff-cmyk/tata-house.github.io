@@ -217,7 +217,7 @@ export function AbaCardapio({
     // Por que esse cardápio? — transparência da decisão
     const porques: Record<typeof modo, { titulo: string; itens: string[] }> = {
       historica: {
-        titulo: 'Cardápio Antigo — por que estes pratos',
+        titulo: 'Base histórica — critérios usados',
         itens: [
           'Priorizei combinações que já apareceram no histórico da operação.',
           temAceitacao ? 'Dei preferência aos pratos com melhor aceitação registrada.' : 'Ainda não há notas de aceitação — usei a frequência de uso.',
@@ -225,7 +225,7 @@ export function AbaCardapio({
         ],
       },
       economica: {
-        titulo: 'Cardápio Mesclado — por que estes pratos',
+        titulo: 'Equilíbrio — critérios usados',
         itens: [
           'Equilibrei pratos tradicionais com variações para evitar monotonia.',
           temFrequencia ? 'Evitei repetir o que saiu nas últimas 4 semanas.' : 'Sem semanas anteriores para comparar — foquei na variedade interna.',
@@ -233,7 +233,7 @@ export function AbaCardapio({
         ],
       },
       criativa: {
-        titulo: 'Cardápio Novo — por que estes pratos',
+        titulo: 'Exploração — critérios usados',
         itens: [
           'Explorei combinações inéditas mantendo a distribuição de proteínas da casa.',
           Object.keys(precos).length > 0 ? 'Puxei para as proteínas mais baratas da cotação atual.' : 'Aplique a cotação para eu priorizar as proteínas mais econômicas.',
@@ -264,7 +264,7 @@ export function AbaCardapio({
     if (personalizado.regras.trim()) itens.push(`Apliquei as regras: ${personalizado.regras.trim()}.`);
     if (itens.length === 0) itens.push('Nenhum parâmetro específico — gerei um cardápio criativo dentro das regras da casa.');
     itens.push('Revise os dias abaixo: ajuste manualmente o que não fizer sentido para a sua operação.');
-    setExplicacao({ titulo: 'Cardápio Personalizado — o que eu considerei', itens });
+    setExplicacao({ titulo: 'Personalizado — critérios usados', itens });
     setGerarAberto(false);
     setFormPersonAberto(false);
   };
@@ -320,17 +320,19 @@ export function AbaCardapio({
     <div className="space-y-4">
       <OperacaoDia aberto={opDia} aoFechar={() => setOpDia(false)} estado={estado} atualizar={atualizar} />
 
-      {/* Atalho: Modo Operação do Dia (foco da cozinha) */}
-      <button
-        onClick={() => setOpDia(true)}
-        className="flex w-full items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-brand-800 to-brand-600 px-4 py-3 text-left text-white shadow-suave ring-1 ring-ouro-400/40 transition hover:from-brand-900 hover:to-brand-700"
-      >
-        <span>
-          <span className="block text-sm font-extrabold tracking-wide">Operação do Dia</span>
-          <span className="block text-caption text-brand-100">O que produzir, receber e comprar hoje — em um toque.</span>
-        </span>
-        <span className="shrink-0 text-lg">→</span>
-      </button>
+      {/* Atalho operacional: útil, mas subordinado ao planejamento desta tela. */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-carvao-200 bg-white px-4 py-3 dark:border-carvao-700 dark:bg-carvao-900 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-micro font-bold uppercase tracking-[0.14em] text-texto-suave">Atalho operacional</p>
+          <p className="mt-1 text-sm font-semibold text-carvao-800 dark:text-areia-100">Produção, recebimento e compras de hoje.</p>
+        </div>
+        <button
+          onClick={() => setOpDia(true)}
+          className="shrink-0 rounded-xl bg-carvao-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-carvao-700 dark:bg-areia-100 dark:text-carvao-900 dark:hover:bg-white"
+        >
+          Abrir operação do dia
+        </button>
+      </div>
 
       {/* Resumo vivo — acompanha a rolagem dos dias */}
       <div className="sticky top-[60px] z-30 -mx-4 bg-areia-50/85 px-4 py-2 backdrop-blur-md dark:bg-carvao-950/85">
@@ -360,7 +362,7 @@ export function AbaCardapio({
                 onClick={() => { setGerarAberto((a) => !a); setFormPersonAberto(false); }}
                 className="flex shrink-0 items-center gap-1.5 rounded-xl border border-carvao-200 bg-white px-3 py-1.5 text-rotulo font-semibold text-carvao-600 transition hover:bg-areia-100 dark:border-carvao-600 dark:bg-carvao-800 dark:text-areia-200"
               >
-                <Icone nome="controles" tam={14} /> Gerar cardápio
+                <Icone nome="controles" tam={14} /> Criar sugestão
               </button>
             )}
           </div>
@@ -397,12 +399,12 @@ export function AbaCardapio({
       {/* Painel de geração — 4 modos */}
       {podeEditar && gerarAberto && (
         <div className="rounded-2xl border border-brand-200 bg-brand-50 p-4 dark:border-brand-900 dark:bg-carvao-900">
-          <p className="mb-3 text-caption font-bold uppercase tracking-wide text-brand-700 dark:text-brand-300">Escolha o modo de geração</p>
+          <p className="mb-3 text-caption font-bold uppercase tracking-wide text-brand-700 dark:text-brand-300">Estratégia da sugestão</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {([
-              { id: 'historica', icone: 'calendario' as const, titulo: 'Antigo', desc: 'Baseado no histórico da operação' },
-              { id: 'economica', icone: 'gerencial' as const,  titulo: 'Mesclado', desc: 'Tradição equilibrada com variedade' },
-              { id: 'criativa', icone: 'raio' as const,        titulo: 'Novo', desc: 'Maior liberdade para novas ideias' },
+              { id: 'historica', icone: 'calendario' as const, titulo: 'Base histórica', desc: 'Recupera combinações que já funcionaram' },
+              { id: 'economica', icone: 'gerencial' as const,  titulo: 'Equilíbrio', desc: 'Combina histórico, variedade, aceitação e custo' },
+              { id: 'criativa', icone: 'raio' as const,        titulo: 'Exploração', desc: 'Busca novidades sem romper as regras da casa' },
             ] as const).map((m) => (
               <button
                 key={m.id}
@@ -428,7 +430,7 @@ export function AbaCardapio({
               <span className="mt-0.5 leading-none text-brand-600 dark:text-brand-300"><Icone nome="controles" tam={20} /></span>
               <div>
                 <p className="text-sm font-bold text-brand-800 dark:text-brand-200">Personalizado</p>
-                <p className="text-caption text-brand-600 dark:text-brand-400">Eventos, metas, proteínas, custo…</p>
+                <p className="text-caption text-brand-600 dark:text-brand-400">Aplique restrições, metas e preferências</p>
               </div>
             </button>
           </div>
@@ -544,7 +546,7 @@ export function AbaCardapio({
             </div>
 
             <Botao variante="sucesso" className="w-full" onClick={gerarPersonalizado}>
-              Gerar cardápio personalizado
+              Criar sugestão personalizada
             </Botao>
           </div>}
         </div>
