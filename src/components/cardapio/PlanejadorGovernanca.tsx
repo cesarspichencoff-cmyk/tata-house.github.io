@@ -72,13 +72,19 @@ function FaixaStatus({
   bloqueios: string[];
   alertas: string[];
 }) {
+  const temBloqueioPrincipal = bloqueios.some((item) => /prato principal.*não definido/i.test(item));
+  const alertasUteis = alertas.filter((item) => !(temBloqueioPrincipal && /sem prato principal definido/i.test(item)));
+  const bloqueiosVisiveis = bloqueios.slice(0, 6);
+  const bloqueiosRestantes = Math.max(0, bloqueios.length - bloqueiosVisiveis.length);
+  const alertasVisiveis = alertasUteis.slice(0, 6);
+  const alertasRestantes = Math.max(0, alertasUteis.length - alertasVisiveis.length);
   return (
     <section className="rounded-3xl border border-carvao-100 bg-white p-5 shadow-sm dark:border-carvao-800 dark:bg-carvao-900">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Planejamento governado</p>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Planejamento da semana</p>
           <h1 className="mt-1 font-display text-2xl font-bold tracking-tight">{contexto.unidadeFonte} · {contexto.semanaId}</h1>
-          <p className="mt-1 text-sm text-texto-suave">O House recomenda e compara. A Governança recebe o rascunho. O humano aprova.</p>
+          <p className="mt-1 text-sm text-texto-suave">O House compara opções. Você revisa a semana e decide antes de enviar.</p>
         </div>
         <span className={`rounded-full px-3 py-1.5 text-xs font-extrabold ${
           podeEnviar
@@ -88,22 +94,28 @@ function FaixaStatus({
           {podeEnviar ? 'Pronto para revisão' : `${bloqueios.length} bloqueio${bloqueios.length === 1 ? '' : 's'}`}
         </span>
       </div>
-      {(bloqueios.length > 0 || alertas.length > 0) && (
+      {(bloqueios.length > 0 || alertasUteis.length > 0) && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {bloqueios.length > 0 && (
             <div className="rounded-2xl border border-red-100 bg-red-50/80 p-4 dark:border-red-900 dark:bg-red-950/20">
               <p className="text-xs font-extrabold uppercase tracking-wider text-red-700 dark:text-red-300">Corrigir antes de enviar</p>
               <ul className="mt-2 space-y-1.5 text-sm text-red-800 dark:text-red-200">
-                {bloqueios.slice(0, 6).map((item) => <li key={item}>• {item}</li>)}
+                {bloqueiosVisiveis.map((item) => <li key={item}>• {item}</li>)}
               </ul>
+              {bloqueiosRestantes > 0 && (
+                <p className="mt-2 text-xs font-bold text-red-700 dark:text-red-300">+{bloqueiosRestantes} bloqueio{bloqueiosRestantes === 1 ? '' : 's'} adicional{bloqueiosRestantes === 1 ? '' : 'is'}</p>
+              )}
             </div>
           )}
-          {alertas.length > 0 && (
+          {alertasUteis.length > 0 && (
             <div className="rounded-2xl border border-ouro-200 bg-ouro-50/70 p-4 dark:border-ouro-800 dark:bg-ouro-950/20">
               <p className="text-xs font-extrabold uppercase tracking-wider text-ouro-700 dark:text-ouro-300">Pontos para decidir</p>
               <ul className="mt-2 space-y-1.5 text-sm text-carvao-700 dark:text-carvao-200">
-                {alertas.slice(0, 6).map((item) => <li key={item}>• {item}</li>)}
+                {alertasVisiveis.map((item) => <li key={item}>• {item}</li>)}
               </ul>
+              {alertasRestantes > 0 && (
+                <p className="mt-2 text-xs font-bold text-ouro-700 dark:text-ouro-300">+{alertasRestantes} ponto{alertasRestantes === 1 ? '' : 's'} adicional{alertasRestantes === 1 ? '' : 'is'}</p>
+              )}
             </div>
           )}
         </div>
@@ -217,7 +229,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
 
         {evidenciaReadOnly && (
           <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
-            <strong>Histórico oficial em leitura:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Nenhum dado foi gravado no Supabase.
+            <strong>Histórico oficial carregado:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Usado somente para analisar esta semana.
           </section>
         )}
 

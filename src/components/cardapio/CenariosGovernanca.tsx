@@ -172,17 +172,17 @@ export function CenariosGovernanca({
     }
     atualizar((atual) => aplicarCenarioAoEstado(atual, cenario.dias));
     setAplicado(cenario.id);
-    setMensagem('Cenário aplicado somente ao rascunho local. Revise e ajuste os dias antes de enviar para a Governança.');
+    setMensagem('Cenário aplicado à proposta. Revise os dias antes de continuar.');
   };
 
   return (
     <section data-testid="comparador-cenarios" className="rounded-3xl border border-carvao-100 bg-gradient-to-b from-white to-areia-50/50 p-4 shadow-sm dark:border-carvao-800 dark:from-carvao-900 dark:to-carvao-950/40 md:p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="max-w-2xl">
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Decisão antes da edição</p>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Compare antes de montar</p>
           <h2 className="mt-1 font-display text-xl font-bold tracking-tight">Compare 3 estratégias para a mesma semana</h2>
           <p className="mt-2 text-sm leading-6 text-texto-suave">
-            O House usa o motor real e mede cada proposta com as mesmas fontes de custo, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
+            Compare propostas com custo, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
           </p>
         </div>
         <button
@@ -211,7 +211,7 @@ export function CenariosGovernanca({
       )}
 
       <div className="mt-4 rounded-2xl border border-dashed border-carvao-200 px-4 py-3 text-xs leading-5 text-texto-suave dark:border-carvao-700">
-        Aplicar = trocar apenas o <strong>rascunho local</strong>. Publicação oficial, Supabase e aprovação automática continuam bloqueados.
+        Aplicar altera apenas esta <strong>proposta</strong>. Nada é publicado sem sua revisão e aprovação.
       </div>
     </section>
   );
