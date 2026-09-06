@@ -2,7 +2,7 @@
 
 import {
   CONTRATO_GOVERNANCA,
-  VERSAO_CONTRATO_GOVERNANANCA,
+  VERSAO_CONTRATO_GOVERNANCA,
   dataLocalIso,
   unidadeHouse,
 } from './governanca-outbox';
@@ -11,7 +11,7 @@ const PREFIXO_CARDAPIO = 'tata.governanca.cardapio.v1.';
 
 export interface CardapioGovernancaDiaV1 {
   contrato: typeof CONTRATO_GOVERNANCA;
-  versao: typeof VERSAO_CONTRATO_GOVERNANANCA;
+  versao: typeof VERSAO_CONTRATO_GOVERNANCA;
   tipo: 'cardapio.dia';
   origem: 'governanca';
   atualizadoEm: string;
@@ -67,7 +67,7 @@ function snapshotValido(v: unknown): v is CardapioGovernancaDiaV1 {
   const s = v as Partial<CardapioGovernancaDiaV1>;
   return Boolean(
     s.contrato === CONTRATO_GOVERNANCA &&
-      s.versao === VERSAO_CONTRATO_GOVERNANANCA &&
+      s.versao === VERSAO_CONTRATO_GOVERNANCA &&
       s.tipo === 'cardapio.dia' &&
       s.origem === 'governanca' &&
       dataHoraValida(texto(s.atualizadoEm)) &&
@@ -91,7 +91,7 @@ export function salvarSnapshotCardapioGovernancaLocal(
 
   const snapshot: CardapioGovernancaDiaV1 = {
     contrato: CONTRATO_GOVERNANCA,
-    versao: VERSAO_CONTRATO_GOVERNANANCA,
+    versao: VERSAO_CONTRATO_GOVERNANCA,
     tipo: 'cardapio.dia',
     origem: 'governanca',
     atualizadoEm: texto(entrada.atualizadoEm),
@@ -124,7 +124,7 @@ export function salvarCardapioGovernancaLocal(
 
   return salvarSnapshotCardapioGovernancaLocal({
     contrato: CONTRATO_GOVERNANCA,
-    versao: VERSAO_CONTRATO_GOVERNANANCA,
+    versao: VERSAO_CONTRATO_GOVERNANCA,
     tipo: 'cardapio.dia',
     origem: 'governanca',
     atualizadoEm: entrada.atualizadoEm?.trim() || new Date().toISOString(),
@@ -154,7 +154,7 @@ export function lerCardapioGovernancaLocal(
     if (!snapshotValido(parsed)) return null;
     return {
       contrato: CONTRATO_GOVERNANCA,
-      versao: VERSAO_CONTRATO_GOVERNANANCA,
+      versao: VERSAO_CONTRATO_GOVERNANCA,
       tipo: 'cardapio.dia',
       origem: 'governanca',
       atualizadoEm: texto(parsed.atualizadoEm),
