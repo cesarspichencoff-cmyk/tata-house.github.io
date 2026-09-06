@@ -1,0 +1,169 @@
+name: House PDF.js security final temporary
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+    paths:
+      - '.github/workflows/pdfjs-security-final-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Apply official patched PDF.js runtime only
+        run: |
+          npm install --save-exact pdfjs-dist@6.2.108
+          cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs
+
+      - name: Verify package, lock, worker and real House API usage
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const pkg=require('./package.json');
+          const lock=require('./package-lock.json');
+          const installed=require('./node_modules/pdfjs-dist/package.json');
+          if(pkg.dependencies['pdfjs-dist']!=='6.2.108') throw new Error('package.json != 6.2.108');
+          if(lock.packages[''].dependencies['pdfjs-dist']!=='6.2.108') throw new Error('lock root != 6.2.108');
+          if(lock.packages['node_modules/pdfjs-dist']?.version!=='6.2.108') throw new Error('lock resolved != 6.2.108');
+          if(installed.version!=='6.2.108') throw new Error('installed != 6.2.108');
+          const src=fs.readFileSync('src/components/cardapio/AbaCotacao.tsx','utf8');
+          if(!src.includes("const pdfjsLib = await import('pdfjs-dist')")) throw new Error('import real ausente');
+          if(!src.includes("GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'")) throw new Error('worker local ausente');
+          if(!src.includes('getDocument({ data: new Uint8Array(arrayBuffer) })')) throw new Error('caminho getDocument real mudou');
+          if(!src.includes('getTextContent()')) throw new Error('extração de texto real ausente');
+          console.log('PDFJS_PACKAGE_VERSION=PASS');
+          console.log('PDFJS_REAL_CALLSITE=PASS');
+          NODE
+          cmp -s public/pdf.worker.min.mjs node_modules/pdfjs-dist/build/pdf.worker.min.mjs
+          echo PDFJS_WORKER_MATCH=PASS
+
+      - name: Verify pdfjs-dist absent from npm audit vulnerabilities
+        run: |
+          npm audit --json > /tmp/npm-audit.json || true
+          node - <<'NODE'
+          const fs=require('fs');
+          const audit=JSON.parse(fs.readFileSync('/tmp/npm-audit.json','utf8'));
+          if(audit.vulnerabilities?.['pdfjs-dist']) throw new Error('pdfjs-dist ainda aparece no npm audit');
+          console.log('PDFJS_NPM_AUDIT=PASS');
+          console.log('NPM_AUDIT_TOTALS='+JSON.stringify(audit.metadata?.vulnerabilities||{}));
+          NODE
+
+      - name: Test
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+      - name: Install Chromium proof dependency
+        run: |
+          mkdir -p /tmp/pdfjs-final && cd /tmp/pdfjs-final
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Prepare exact-origin browser extraction proof
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          objects=[
+            '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+            '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+            '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+            '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+          ]
+          stream='BT\n/F1 18 Tf\n72 720 Td\n(PDF SEGURANCA OK) Tj\nET\n'
+          objects.append(f'5 0 obj\n<< /Length {len(stream.encode())} >>\nstream\n{stream}endstream\nendobj\n')
+          out=bytearray(b'%PDF-1.4\n'); offsets=[]
+          for obj in objects:
+              offsets.append(len(out)); out.extend(obj.encode())
+          xref=len(out); out.extend(f'xref\n0 {len(objects)+1}\n'.encode()); out.extend(b'0000000000 65535 f \n')
+          for off in offsets: out.extend(f'{off:010d} 00000 n \n'.encode())
+          out.extend(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode())
+          Path('/tmp/pdfjs-final/sample.pdf').write_bytes(out)
+          PY
+          cat > /tmp/pdfjs-final-cert.cnf <<'EOF'
+          [req]
+          distinguished_name=req_dn
+          x509_extensions=v3_req
+          prompt=no
+          [req_dn]
+          CN=tata-house.github.io
+          [v3_req]
+          subjectAltName=@alt_names
+          [alt_names]
+          DNS.1=tata-house.github.io
+          EOF
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /tmp/pdfjs-final-key.pem -out /tmp/pdfjs-final-cert.pem -config /tmp/pdfjs-final-cert.cnf >/dev/null 2>&1
+
+          cat > /tmp/pdfjs-final/server.cjs <<'NODE'
+          const https=require('https'),fs=require('fs'),path=require('path');
+          const root=process.env.GITHUB_WORKSPACE;
+          const html=`<!doctype html><meta charset="utf-8"><title>PDF.js final proof</title><input id="file" type="file"><pre id="result">WAIT</pre>
+          <script type="module">
+          import * as pdfjsLib from '/pdf.mjs';
+          window.__PDFJS_VERSION=pdfjsLib.version;
+          pdfjsLib.GlobalWorkerOptions.workerSrc='/pdf.worker.min.mjs';
+          document.getElementById('file').addEventListener('change',async(e)=>{try{const file=e.target.files[0];const arrayBuffer=await file.arrayBuffer();const pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuffer)}).promise;const paginas=[];for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i);const content=await page.getTextContent();paginas.push(content.items.map(it=>'str' in it?it.str:'').join(' '));}document.getElementById('result').textContent=paginas.join('\n');window.__PDF_PROOF={ok:true,numPages:pdf.numPages,version:pdfjsLib.version}}catch(err){window.__PDF_PROOF={ok:false,error:String(err)};document.getElementById('result').textContent='ERROR '+err}});
+          </script>`;
+          function send(res,status,body,type='text/plain; charset=utf-8'){res.writeHead(status,{'content-type':type,'cache-control':'no-store'});res.end(body)}
+          function stream(res,p,type){res.writeHead(200,{'content-type':type,'cache-control':'no-store'});fs.createReadStream(p).pipe(res)}
+          https.createServer({key:fs.readFileSync('/tmp/pdfjs-final-key.pem'),cert:fs.readFileSync('/tmp/pdfjs-final-cert.pem')},(req,res)=>{const p=new URL(req.url,'https://tata-house.github.io').pathname;if(p==='/'||p==='/pdf-proof.html')return send(res,200,html,'text/html; charset=utf-8');if(p==='/pdf.mjs')return stream(res,path.join(root,'node_modules/pdfjs-dist/build/pdf.mjs'),'application/javascript');if(p==='/pdf.worker.min.mjs')return stream(res,path.join(root,'public/pdf.worker.min.mjs'),'application/javascript');return send(res,404,'not found')}).listen(443,'0.0.0.0');
+          NODE
+          cat > /tmp/pdfjs-final/test.cjs <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{const browser=await chromium.launch({headless:true,args:['--host-resolver-rules=MAP tata-house.github.io 127.0.0.1','--no-proxy-server']});const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:390,height:844}});const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(String(e)));await page.goto('https://tata-house.github.io/pdf-proof.html',{waitUntil:'domcontentloaded'});await page.waitForFunction(()=>window.__PDFJS_VERSION);if(await page.evaluate(()=>window.__PDFJS_VERSION)!=='6.2.108')throw new Error('browser runtime version mismatch');await page.locator('#file').setInputFiles('/tmp/pdfjs-final/sample.pdf');await page.waitForFunction(()=>window.__PDF_PROOF?.ok===true,null,{timeout:15000});const proof=await page.evaluate(()=>window.__PDF_PROOF);const text=(await page.locator('#result').textContent())||'';if(proof.version!=='6.2.108'||proof.numPages!==1||!text.includes('PDF SEGURANCA OK'))throw new Error('extraction proof '+JSON.stringify({proof,text}));if(errors.length)throw new Error('page errors '+JSON.stringify(errors));console.log('PDFJS_BROWSER_VERSION=PASS');console.log('PDFJS_BROWSER_WORKER=PASS');console.log('PDFJS_BROWSER_TEXT_EXTRACTION=PASS');await browser.close()})().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node --check /tmp/pdfjs-final/server.cjs
+          node --check /tmp/pdfjs-final/test.cjs
+
+      - name: Start exact-origin proof server
+        run: |
+          sudo -E node /tmp/pdfjs-final/server.cjs >/tmp/pdfjs-final-server.log 2>&1 &
+          for i in $(seq 1 20); do if curl --noproxy '*' --resolve tata-house.github.io:443:127.0.0.1 -ksSf https://tata-house.github.io/pdf-proof.html >/dev/null; then exit 0; fi; sleep 1; done
+          cat /tmp/pdfjs-final-server.log
+          exit 1
+      - name: Prove real PDF API path in Chromium
+        run: cd /tmp/pdfjs-final && node test.cjs
+      - name: Diff hygiene
+        run: git diff --check
+
+      - name: Commit isolated official remediation
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          git add -- package.json package-lock.json public/pdf.worker.min.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(security): upgrade PDF.js to patched 6.2.108"
+          git push origin HEAD:feat/house-governanca-phase1
+
+      - name: Remove temporary workflow only
+        if: always()
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          for attempt in 1 2 3; do
+            git fetch origin feat/house-governanca-phase1
+            git reset --hard origin/feat/house-governanca-phase1
+            if [ ! -f .github/workflows/pdfjs-security-final-temp.yml ]; then exit 0; fi
+            git rm -f -- .github/workflows/pdfjs-security-final-temp.yml
+            git commit -m "test(house): remove temporary PDF.js final proof harness"
+            if git push origin HEAD:feat/house-governanca-phase1; then exit 0; fi
+            sleep 1
+          done
+          exit 1
