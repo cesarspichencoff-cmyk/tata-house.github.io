@@ -8,8 +8,7 @@ import {
 export const GOV_HANDOFF_READY_V1 = 'tata-house:governanca:ready:v1' as const;
 export const GOV_HANDOFF_CARDAPIO_V1 = 'tata-house:governanca:cardapio:v1' as const;
 export const GOV_HANDOFF_ACK_V1 = 'tata-house:governanca:ack:v1' as const;
-
-const ORIGEM_GOVERNANCA_PADRAO = 'https://lideres.tatasushi.tech';
+export const ORIGEM_GOVERNANCA_V1 = 'https://lideres.tatasushi.tech' as const;
 
 interface MensagemCardapioV1 {
   type: typeof GOV_HANDOFF_CARDAPIO_V1;
@@ -28,10 +27,6 @@ function texto(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
 
-export function origemGovernancaPermitida(): string {
-  return (process.env.NEXT_PUBLIC_GOVERNANCA_ORIGIN ?? '').trim() || ORIGEM_GOVERNANCA_PADRAO;
-}
-
 /**
  * Núcleo determinístico do handoff. Origem diferente da autorizada nunca chega
  * à persistência. Mensagem do tipo correto, mas payload inválido, é tratada e
@@ -40,7 +35,7 @@ export function origemGovernancaPermitida(): string {
 export function processarMensagemCardapioGovernanca(
   origem: string,
   dados: unknown,
-  origemEsperada = origemGovernancaPermitida(),
+  origemEsperada: string = ORIGEM_GOVERNANCA_V1,
 ): ResultadoHandoffGovernanca {
   if (origem !== origemEsperada || !dados || typeof dados !== 'object') {
     return { tratado: false, aceito: false };
@@ -74,13 +69,11 @@ export function instalarHandoffCardapioGovernanca(
 ): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  const origemPermitida = origemGovernancaPermitida();
-
   const aoReceber = (event: MessageEvent<unknown>) => {
     const resultado = processarMensagemCardapioGovernanca(
       event.origin,
       event.data,
-      origemPermitida,
+      ORIGEM_GOVERNANCA_V1,
     );
     if (!resultado.tratado) return;
 
@@ -94,7 +87,7 @@ export function instalarHandoffCardapioGovernanca(
     };
 
     try {
-      (event.source as Window | null)?.postMessage(ack, origemPermitida);
+      (event.source as Window | null)?.postMessage(ack, ORIGEM_GOVERNANCA_V1);
     } catch {
       // A persistência local já decidiu o resultado; falha de ACK não a desfaz.
     }
@@ -108,12 +101,12 @@ export function instalarHandoffCardapioGovernanca(
 
   const ready = { type: GOV_HANDOFF_READY_V1, versao: 1 };
   try {
-    window.opener?.postMessage(ready, origemPermitida);
+    window.opener?.postMessage(ready, ORIGEM_GOVERNANCA_V1);
   } catch {
     // Sem opener autorizado: o House segue normalmente.
   }
   try {
-    if (window.parent !== window) window.parent.postMessage(ready, origemPermitida);
+    if (window.parent !== window) window.parent.postMessage(ready, ORIGEM_GOVERNANCA_V1);
   } catch {
     // Sem parent autorizado: o House segue normalmente.
   }
