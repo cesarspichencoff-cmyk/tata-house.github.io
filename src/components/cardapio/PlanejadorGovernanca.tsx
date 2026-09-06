@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
+import { CenariosGovernanca } from './CenariosGovernanca';
 import {
+  lerSemana,
+  semanasComConteudo,
   useAceitacao,
   useAprendizado,
+  useEstoque,
   useFornecedores,
   useHistoricoPrecos,
   useItensExtras,
@@ -13,6 +17,8 @@ import {
   usePrecos,
   useSemana,
 } from '@/lib/cardapio/estado';
+import { useEstimativas } from '@/lib/cardapio/estimativas';
+import { normalizar } from '@/lib/cardapio/motor';
 import {
   avaliarProntidaoPlanejamento,
   construirDraftPlanejamentoGovernanca,
@@ -65,7 +71,7 @@ function FaixaStatus({
         <div>
           <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Planejamento governado</p>
           <h1 className="mt-1 font-display text-2xl font-bold tracking-tight">{contexto.unidadeFonte} · {contexto.semanaId}</h1>
-          <p className="mt-1 text-sm text-texto-suave">O House recomenda. A Governança recebe o rascunho. O humano aprova.</p>
+          <p className="mt-1 text-sm text-texto-suave">O House recomenda e compara. A Governança recebe o rascunho. O humano aprova.</p>
         </div>
         <span className={`rounded-full px-3 py-1.5 text-xs font-extrabold ${
           podeEnviar
@@ -112,7 +118,29 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const { itensExtras, cadastrarItem } = useItensExtras();
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
+  const { estoque } = useEstoque();
+  const { estimativas } = useEstimativas();
   const historico = useHistoricoPrecos();
+
+  const frequenciaRecente = useMemo(() => {
+    const cont: Record<string, number> = {};
+    const ids = semanasComConteudo()
+      .filter((sid) => sid !== contexto.semanaId)
+      .sort()
+      .slice(-4);
+    ids.forEach((sid) => {
+      lerSemana(sid).dias.forEach((dia) => {
+        if (!dia.principal) return;
+        const chave = normalizar(dia.principal);
+        cont[chave] = (cont[chave] ?? 0) + 1;
+      });
+    });
+    return cont;
+  }, [contexto.semanaId]);
+
+  const estoqueQuantidade = useMemo(() => Object.fromEntries(
+    Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
+  ), [estoque]);
 
   const prontidao = useMemo(
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
@@ -178,7 +206,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
                 : 'text-carvao-500 hover:bg-carvao-50 dark:text-carvao-300 dark:hover:bg-carvao-800'
             }`}
           >
-            1. Compor semana
+            1. Comparar e compor
           </button>
           <button
             type="button"
@@ -194,25 +222,38 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
         </div>
 
         {aba === 'montar' ? (
-          <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
-            <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
-              Escolha Base histórica, Equilíbrio, Exploração ou Personalizado. O motor considera rotação, frequência, aceitação e preços disponíveis; a decisão continua ajustável dia a dia.
-            </div>
-            <AbaCardapio
+          <div className="space-y-4">
+            <CenariosGovernanca
               estado={estado}
               atualizar={atualizar}
-              semanaId={contexto.semanaId}
-              fatores={fatores}
-              podeEditar={true}
               precos={precos}
-              definirPreco={definirPreco}
-              definirFornecedor={definirFornecedor}
-              cadastrarItem={cadastrarItem}
-              registrarOferta={registrarOferta}
-              fornecedores={fornecedores}
-              itensExtras={itensExtras}
+              estimativas={estimativas}
+              fatores={fatores}
+              aceitacao={aceitacao}
+              frequencia={frequenciaRecente}
+              estoque={estoqueQuantidade}
             />
-          </section>
+
+            <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
+              <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
+                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Os geradores antigos continuam disponíveis como ferramenta secundária, mas não substituem a comparação acima.
+              </div>
+              <AbaCardapio
+                estado={estado}
+                atualizar={atualizar}
+                semanaId={contexto.semanaId}
+                fatores={fatores}
+                podeEditar={true}
+                precos={precos}
+                definirPreco={definirPreco}
+                definirFornecedor={definirFornecedor}
+                cadastrarItem={cadastrarItem}
+                registrarOferta={registrarOferta}
+                fornecedores={fornecedores}
+                itensExtras={itensExtras}
+              />
+            </section>
+          </div>
         ) : (
           <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
             <div className="mb-4 rounded-2xl bg-carvao-50 px-4 py-3 text-sm text-carvao-600 dark:bg-carvao-800 dark:text-carvao-200">
