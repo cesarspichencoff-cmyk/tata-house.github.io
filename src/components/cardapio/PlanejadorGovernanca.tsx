@@ -28,6 +28,11 @@ import {
   instalarHandoffPlanejadorGovernanca,
   type PlanejadorContextoGovernancaV1,
 } from '@/lib/cardapio/governanca-planejador';
+import {
+  frequenciaOficial4Semanas,
+  instalarHandoffEvidenciaReadOnly,
+  type EvidenciaGovernancaReadOnlyV1,
+} from '@/lib/cardapio/governanca-readonly';
 
 function novoId(prefixo: string): string {
   try {
@@ -111,6 +116,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [aba, setAba] = useState<'montar' | 'decisao'>('montar');
   const [envio, setEnvio] = useState<'ocioso' | 'enviando' | 'confirmado' | 'erro'>('ocioso');
   const [mensagemEnvio, setMensagemEnvio] = useState('');
+  const [evidenciaReadOnly, setEvidenciaReadOnly] = useState<EvidenciaGovernancaReadOnlyV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
   const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
@@ -138,8 +144,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
         cont[chave] = (cont[chave] ?? 0) + 1;
       });
     });
+    const oficial = frequenciaOficial4Semanas(evidenciaReadOnly);
+    Object.entries(oficial).forEach(([chave, qtd]) => {
+      cont[chave] = Math.max(cont[chave] ?? 0, qtd);
+    });
     return cont;
-  }, [contexto.semanaId]);
+  }, [contexto.semanaId, evidenciaReadOnly]);
 
   const estoqueQuantidade = useMemo(() => Object.fromEntries(
     Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
@@ -149,6 +159,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
     [estado.dias, precos],
   );
+
+  useEffect(() => instalarHandoffEvidenciaReadOnly({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoEvidencia: setEvidenciaReadOnly,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
 
   useEffect(() => instalarHandoffPlanejadorGovernanca({
     aoContexto: () => {},
@@ -198,6 +214,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
           bloqueios={prontidao.bloqueios}
           alertas={prontidao.alertas}
         />
+
+        {evidenciaReadOnly && (
+          <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
+            <strong>Histórico oficial em leitura:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Nenhum dado foi gravado no Supabase.
+          </section>
+        )}
 
         <div className="sticky top-2 z-20 flex items-center gap-2 rounded-2xl border border-carvao-100 bg-white/95 p-2 shadow-sm backdrop-blur dark:border-carvao-800 dark:bg-carvao-900/95">
           <button
