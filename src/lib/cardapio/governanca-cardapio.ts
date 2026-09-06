@@ -8,6 +8,7 @@ import {
 } from './governanca-outbox';
 
 const PREFIXO_CARDAPIO = 'tata.governanca.cardapio.v1.';
+const DATA_HORA_RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export interface CardapioGovernancaDiaV1 {
   contrato: typeof CONTRATO_GOVERNANCA;
@@ -55,7 +56,7 @@ function dataValida(v: string): boolean {
 }
 
 function dataHoraValida(v: string): boolean {
-  return Boolean(v && !Number.isNaN(Date.parse(v)));
+  return DATA_HORA_RFC3339.test(v) && !Number.isNaN(Date.parse(v));
 }
 
 function chave(data: string, unidade: string): string {
