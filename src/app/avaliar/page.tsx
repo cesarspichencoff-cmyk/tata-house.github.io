@@ -19,6 +19,8 @@ import {
 import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';
 import { instalarHandoffCardapioGovernanca } from '@/lib/cardapio/governanca-handoff';
 import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
+import { criarTransportePostMessageGovernanca } from '@/lib/cardapio/governanca-postmessage';
+import { sincronizarPendenciasGovernanca } from '@/lib/cardapio/governanca-sync';
 
 type Voto = 'bom' | 'ok' | 'ruim';
 
@@ -119,6 +121,13 @@ export default function PaginaAvaliar() {
     const pararChaveExterna = assinarChaveExterna('semana.' + semanaId, atualizar);
     const pararHandoff = instalarHandoffCardapioGovernanca(() => atualizar());
 
+    // Se esta tela foi aberta pela Governança, aproveita o canal autorizado para
+    // tentar escoar pendências antigas. Sem opener/parent, o transporte confirma
+    // zero IDs e a outbox permanece intacta.
+    void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
+      // A sincronização é secundária; nunca bloqueia o QR nem apaga pendências.
+    });
+
     return () => {
       pararChaveExterna();
       pararHandoff();
@@ -150,13 +159,21 @@ export default function PaginaAvaliar() {
     registrarVotoCliente(prato, voto, textoComentario);
 
     // 2) Contrato da Governança: persistência LOCAL, sem HTTP/Supabase.
-    // Um transporte futuro confirma IDs individualmente e só então limpa a fila.
-    registrarAvaliacaoGovernancaPendente({
+    // Um transporte confirma IDs individualmente e só então limpa a fila.
+    const pendente = registrarAvaliacaoGovernancaPendente({
       data: new Date(),
       prato,
       voto,
       comentario: textoComentario,
     });
+
+    // 3) Prova browser→browser: somente quando existe uma janela da Governança.
+    // Ausência/falha do canal não muda a experiência nem perde o voto local.
+    if (pendente) {
+      void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
+        // A outbox continua sendo a fonte da pendência até um ACK válido chegar.
+      });
+    }
 
     setEnviado(true);
     setQualidade(null);
