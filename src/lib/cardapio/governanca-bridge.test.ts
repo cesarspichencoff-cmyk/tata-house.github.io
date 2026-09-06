@@ -11,6 +11,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function desabilitar() {
+  vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_SUPABASE_URL', '');
+  vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_SUPABASE_KEY', '');
+  vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_SUPABASE_PUBLISHABLE_KEY', '');
+  vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_UNIDADE', '');
+}
+
 function habilitar() {
   vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_SUPABASE_URL', 'https://governanca.supabase.co');
   vi.stubEnv('NEXT_PUBLIC_GOVERNANCA_SUPABASE_KEY', 'sb_publishable_teste');
@@ -19,6 +26,7 @@ function habilitar() {
 
 describe('governanca-bridge', () => {
   it('fica desligada sem configuração completa', () => {
+    desabilitar();
     expect(governancaHabilitada()).toBe(false);
   });
 
