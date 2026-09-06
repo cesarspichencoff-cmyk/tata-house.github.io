@@ -6,8 +6,13 @@
    abrir já com a navegação do perfil. Visual premium, mobile-first.
    ===================================================================== */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PERFIS, useLogin, type PerfilLogin } from '@/lib/cardapio/login';
+import {
+  EVENTO_GOVERNANCA_CONTEXTO_V1,
+  lerContextoGovernanca,
+  type ContextoGovernancaV1,
+} from '@/lib/cardapio/governanca-contexto';
 
 export function Login() {
   const { entrar } = useLogin();
@@ -15,6 +20,17 @@ export function Login() {
   const [pin, setPin] = useState('');
   const [erro, setErro] = useState(false);
   const [verificando, setVerificando] = useState(false);
+  const [contexto, setContexto] = useState<ContextoGovernancaV1 | null>(null);
+
+  useEffect(() => {
+    setContexto(lerContextoGovernanca());
+    const aoContexto = (event: Event) => {
+      const detalhe = (event as CustomEvent<ContextoGovernancaV1>).detail;
+      if (detalhe) setContexto(detalhe);
+    };
+    window.addEventListener(EVENTO_GOVERNANCA_CONTEXTO_V1, aoContexto);
+    return () => window.removeEventListener(EVENTO_GOVERNANCA_CONTEXTO_V1, aoContexto);
+  }, []);
 
   const perfil = PERFIS.find((p) => p.id === sel) ?? null;
 
@@ -44,6 +60,17 @@ export function Login() {
             Refeitório do Tatá Sushi
           </p>
         </div>
+
+        {contexto && (
+          <div className="mb-4 rounded-2xl bg-white/10 px-4 py-3 ring-1 ring-white/15" data-testid="governanca-contexto">
+            <p className="text-micro font-extrabold uppercase tracking-[0.18em] text-ouro-300">Acesso via TATÁ Plus</p>
+            <p className="mt-1 text-sm font-bold text-white">{contexto.displayName || 'Usuário identificado'}</p>
+            {contexto.perfil && <p className="text-caption text-brand-100/70">Perfil no Plus: {contexto.perfil}</p>}
+            <p className="mt-2 text-caption leading-relaxed text-brand-100/70">
+              Confirme abaixo seu perfil do House. A identidade do Plus não libera permissões automaticamente.
+            </p>
+          </div>
+        )}
 
         {!perfil ? (
           <div className="space-y-3">
