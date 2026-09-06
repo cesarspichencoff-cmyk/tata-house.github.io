@@ -1,0 +1,22 @@
+name: Phase 4 Planner Gate
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      - name: Assert planner export
+        run: test -f out/planejar.html && grep -q "Planejador inteligente" out/planejar.html
