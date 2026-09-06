@@ -1,0 +1,182 @@
+name: House governance identity boundary E2E temporary
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+
+permissions:
+  contents: write
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build House feature in isolation
+        run: |
+          npm ci
+          npm run build
+        env:
+          NEXT_PUBLIC_EMAILJS_SERVICE_ID: house-context-e2e
+          NEXT_PUBLIC_EMAILJS_TEMPLATE_ID: house-context-e2e
+          NEXT_PUBLIC_EMAILJS_PUBLIC_KEY: house-context-e2e
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: house-context-e2e
+          NEXT_PUBLIC_GEMINI_API_KEY: house-context-e2e
+          NEXT_PUBLIC_GROQ_KEY: house-context-e2e
+      - name: Checkout Governance feature after House build
+        uses: actions/checkout@v4
+        with:
+          repository: cesarspichencoff-cmyk/lideres
+          ref: feat/tatahouse-governanca-phase1
+          path: lideres
+          fetch-depth: 1
+      - name: Install Chromium
+        run: |
+          mkdir -p /tmp/house-context-e2e
+          cd /tmp/house-context-e2e
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Start exact-origin HTTPS harness
+        run: |
+          echo '127.0.0.1 tata-house.github.io lideres.tatasushi.tech' | sudo tee -a /etc/hosts >/dev/null
+          cat >/tmp/house-context-e2e/openssl.cnf <<'EOF'
+          [req]
+          distinguished_name=req_dn
+          x509_extensions=v3_req
+          prompt=no
+          [req_dn]
+          CN=tata-house.github.io
+          [v3_req]
+          subjectAltName=@alt_names
+          [alt_names]
+          DNS.1=tata-house.github.io
+          DNS.2=lideres.tatasushi.tech
+          EOF
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout /tmp/house-context-e2e/key.pem \
+            -out /tmp/house-context-e2e/cert.pem \
+            -config /tmp/house-context-e2e/openssl.cnf >/dev/null 2>&1
+          cat >/tmp/house-context-e2e/server.cjs <<'NODE'
+          const https = require('https');
+          const fs = require('fs');
+          const path = require('path');
+          const roots = {
+            'tata-house.github.io': path.join(process.env.GITHUB_WORKSPACE, 'out'),
+            'lideres.tatasushi.tech': path.join(process.env.GITHUB_WORKSPACE, 'lideres'),
+          };
+          const mime = {'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.webmanifest':'application/manifest+json'};
+          function safe(root, url) {
+            let pathname = decodeURIComponent((url || '/').split('?')[0]);
+            if (pathname.endsWith('/')) pathname += 'index.html';
+            let file = path.resolve(root, '.' + pathname);
+            if (!file.startsWith(path.resolve(root))) return null;
+            if (!path.extname(file) && fs.existsSync(file + '.html')) file += '.html';
+            return file;
+          }
+          const server = https.createServer({key:fs.readFileSync('/tmp/house-context-e2e/key.pem'),cert:fs.readFileSync('/tmp/house-context-e2e/cert.pem')}, (req,res) => {
+            const host = String(req.headers.host || '').split(':')[0];
+            const root = roots[host];
+            if (!root) { res.writeHead(404); return res.end('host'); }
+            const file = safe(root, req.url);
+            if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); return res.end('not found'); }
+            res.writeHead(200, {'content-type': mime[path.extname(file)] || 'application/octet-stream', 'cache-control':'no-store'});
+            fs.createReadStream(file).pipe(res);
+          });
+          server.listen(443, '0.0.0.0', () => console.log('HTTPS_READY'));
+          NODE
+          sudo --preserve-env=GITHUB_WORKSPACE node /tmp/house-context-e2e/server.cjs >/tmp/house-context-e2e/server.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -kfsS https://tata-house.github.io/ >/dev/null && curl -kfsS https://lideres.tatasushi.tech/compliance/kpis/tatahouse/central.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/house-context-e2e/server.log
+          exit 1
+      - name: Prove Plus identity cannot grant House privilege
+        run: |
+          cat >/tmp/house-context-e2e/proof.cjs <<'NODE'
+          const { chromium } = require('/tmp/house-context-e2e/node_modules/playwright');
+          const assert = (c,m) => { if(!c) throw new Error(m); };
+          (async()=>{
+            const browser = await chromium.launch({headless:true});
+            try {
+              const context = await browser.newContext({ignoreHTTPSErrors:true, viewport:{width:1280,height:900}});
+              const page = await context.newPage();
+              await page.route('https://cdn.jsdelivr.net/**', route => route.fulfill({status:200, contentType:'text/javascript', body:'window.supabase={};'}));
+              await page.route('https://lideres.tatasushi.tech/compliance/gate.js', route => route.fulfill({
+                status:200,
+                contentType:'text/javascript',
+                body:`window.__lideresSession={displayName:'César Prova',perfil:'admin',paginas:[]};setTimeout(function(){document.documentElement.dataset.auth='ok';},5000);`
+              }));
+              await page.goto('https://lideres.tatasushi.tech/compliance/kpis/tatahouse/central.html', {waitUntil:'domcontentloaded'});
+              await page.waitForSelector('#house-frame', {timeout:10000});
+              let frame = null;
+              for (let i=0;i<40;i++) {
+                frame = page.frames().find(f => f.url().startsWith('https://tata-house.github.io/'));
+                if (frame) break;
+                await page.waitForTimeout(100);
+              }
+              assert(frame, 'House iframe não abriu na origem canônica');
+              await frame.waitForSelector('text=TATÁ HOUSE', {timeout:15000});
+
+              const before = await frame.evaluate(() => ({
+                contexto: sessionStorage.getItem('tata.governanca.contexto.v1'),
+                papel: localStorage.getItem('cardapio.v1.papel'),
+                perfil: localStorage.getItem('cardapio.v1.login.perfil'),
+              }));
+              assert(before.contexto === null, 'Contexto foi entregue antes de a Governança autorizar a página');
+              assert(before.papel === null && before.perfil === null, 'House iniciou com autorização inesperada');
+
+              await frame.waitForSelector('[data-testid="governanca-contexto"]', {timeout:12000});
+              const card = await frame.locator('[data-testid="governanca-contexto"]').innerText();
+              assert(card.includes('César Prova'), 'Identidade descritiva do Plus não apareceu no House');
+              assert(card.includes('não libera permissões automaticamente'), 'Aviso de fronteira de autorização ausente');
+
+              const authBeforeAttack = await frame.evaluate(() => ({
+                papel: localStorage.getItem('cardapio.v1.papel'),
+                perfil: localStorage.getItem('cardapio.v1.login.perfil'),
+                contexto: sessionStorage.getItem('tata.governanca.contexto.v1'),
+              }));
+              assert(authBeforeAttack.papel === null && authBeforeAttack.perfil === null, 'Contexto legítimo do Plus alterou autorização do House');
+              assert(authBeforeAttack.contexto && authBeforeAttack.contexto.includes('César Prova'), 'Contexto legítimo não ficou restrito à sessão');
+
+              await page.evaluate(() => {
+                const f = document.getElementById('house-frame');
+                f.contentWindow.postMessage({
+                  type:'tata-house:governanca:contexto:v1',
+                  payload:{displayName:'Ataque',perfil:'admin',papel:'administrador',token:'segredo',pin:'1234',permissoes:['*']}
+                }, 'https://tata-house.github.io');
+              });
+              await page.waitForTimeout(400);
+              const authAfterAttack = await frame.evaluate(() => ({
+                papel: localStorage.getItem('cardapio.v1.papel'),
+                perfil: localStorage.getItem('cardapio.v1.login.perfil'),
+                contexto: sessionStorage.getItem('tata.governanca.contexto.v1'),
+              }));
+              assert(authAfterAttack.papel === null && authAfterAttack.perfil === null, 'Payload malicioso elevou autorização do House');
+              assert(authAfterAttack.contexto === authBeforeAttack.contexto, 'Payload com campos proibidos sobrescreveu contexto legítimo');
+              console.log('HOUSE_GOVERNANCE_IDENTITY_BOUNDARY=PASS');
+              await context.close();
+            } finally { await browser.close(); }
+          })().catch(e=>{console.error(e);process.exit(1);});
+          NODE
+          node /tmp/house-context-e2e/proof.cjs
+      - name: Diff hygiene
+        run: git diff --check 6dc04827b195aaca9d4653618e5a40ca64a1a6f4...HEAD
+      - name: Remove temporary E2E harness
+        if: always()
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          rm -f .github/workflows/house-governanca-contexto-e2e-temp.yml
+          git add .github/workflows/house-governanca-contexto-e2e-temp.yml
+          git commit -m "test(house): remove temporary governance identity E2E"
+          git push origin HEAD:feat/house-governanca-phase1
