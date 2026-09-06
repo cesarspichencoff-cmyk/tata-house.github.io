@@ -4,6 +4,7 @@ import {
   normalizarEvidenciaGovernancaReadOnly,
   processarMensagemEvidenciaGovernanca,
   GOV_PLANEJADOR_EVIDENCIA_V1,
+  GOV_PLANEJADOR_EVIDENCIA_READY_V1,
   ORIGEM_GOVERNANCA_READONLY_V1,
 } from './governanca-readonly';
 
@@ -43,6 +44,10 @@ const evidencia = {
 };
 
 describe('governanca-readonly', () => {
+  it('versiona handshake próprio para evidência somente após receptor montado', () => {
+    expect(GOV_PLANEJADOR_EVIDENCIA_READY_V1).toBe('tata-house:governanca:planejador:evidencia:ready:v1');
+  });
+
   it('aceita somente o contrato minimizado e estrito', () => {
     expect(normalizarEvidenciaGovernancaReadOnly(evidencia)).toEqual(evidencia);
     expect(normalizarEvidenciaGovernancaReadOnly({ ...evidencia, token: 'proibido' })).toBeNull();
