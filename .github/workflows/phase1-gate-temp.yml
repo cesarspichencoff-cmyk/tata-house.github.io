@@ -1,0 +1,38 @@
+name: Phase 1 Gate (temporary)
+
+on:
+  push:
+    branches:
+      - feat/house-governanca-phase1
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_EMAILJS_SERVICE_ID: phase1-gate
+          NEXT_PUBLIC_EMAILJS_TEMPLATE_ID: phase1-gate
+          NEXT_PUBLIC_EMAILJS_PUBLIC_KEY: phase1-gate
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: phase1-gate
+          NEXT_PUBLIC_GEMINI_API_KEY: phase1-gate
+          NEXT_PUBLIC_GROQ_KEY: phase1-gate
