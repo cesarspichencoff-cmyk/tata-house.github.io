@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import {
@@ -102,8 +102,8 @@ function FaixaStatus({
 function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovernancaV1 }) {
   const [aba, setAba] = useState<'montar' | 'decisao'>('montar');
   const [envio, setEnvio] = useState<'ocioso' | 'enviando' | 'confirmado' | 'erro'>('ocioso');
-  const [proposalId, setProposalId] = useState<string | null>(null);
   const [mensagemEnvio, setMensagemEnvio] = useState('');
+  const proposalIdPendente = useRef<string | null>(null);
 
   const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
   const { precos, definirPreco } = usePrecos();
@@ -122,25 +122,27 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   useEffect(() => instalarHandoffPlanejadorGovernanca({
     aoContexto: () => {},
     aoAckRascunho: (ack) => {
-      if (!proposalId || ack.proposalId !== proposalId) return;
+      if (!proposalIdPendente.current || ack.proposalId !== proposalIdPendente.current) return;
       setEnvio(ack.ok ? 'confirmado' : 'erro');
       setMensagemEnvio(
         ack.ok
           ? 'Rascunho recebido pela Governança. Ele ainda precisa de decisão humana para virar cardápio oficial.'
           : 'A Governança rejeitou o rascunho. Revise o contexto e tente novamente.',
       );
+      if (ack.ok) proposalIdPendente.current = null;
     },
-  }), [proposalId]);
+  }), []);
 
   const enviarParaGovernanca = () => {
     if (!prontidao.podeEnviar) return;
     const id = novoId('planejamento');
     const draft = construirDraftPlanejamentoGovernanca(contexto, estado.dias, prontidao, id);
-    setProposalId(id);
+    proposalIdPendente.current = id;
     setEnvio('enviando');
     setMensagemEnvio('Enviando rascunho para revisão na Governança…');
     const enviado = enviarDraftPlanejamentoGovernanca(draft);
     if (!enviado) {
+      proposalIdPendente.current = null;
       setEnvio('erro');
       setMensagemEnvio('Não encontrei a janela da Governança para receber este rascunho.');
     }
