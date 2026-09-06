@@ -16,6 +16,10 @@ import {
   registrarVotoCliente,
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
+import {
+  enviarAvaliacaoGovernanca,
+  lerCardapioGovernanca,
+} from '@/lib/cardapio/governanca-bridge';
 
 type Voto = 'bom' | 'ok' | 'ruim';
 
@@ -95,11 +99,35 @@ export default function PaginaAvaliar() {
   const [comentario, setComentario] = useState('');
 
   useEffect(() => {
-    const ler = () => setCardapio(lerCardapioDoDia(semanaId, diaIdx));
-    ler();
-    setPronto(true);
-    // mostra o cardápio assim que o BootNuvem o traz da nuvem (celular novo)
-    return assinarChaveExterna('semana.' + semanaId, ler);
+    let ativo = true;
+
+    const atualizar = () => {
+      // Fallback imediato: preserva o comportamento offline existente.
+      setCardapio(lerCardapioDoDia(semanaId, diaIdx));
+      setPronto(true);
+
+      // Quando a ponte está configurada, o cardápio operacional da Governança
+      // prevalece para o QR. Falha remota não apaga o dado local.
+      void lerCardapioGovernanca(new Date())
+        .then((remoto) => {
+          if (!ativo || !remoto) return;
+          setCardapio({
+            principal: remoto.principal,
+            guarnicao: remoto.guarnicao,
+            salada: remoto.salada,
+          });
+        })
+        .catch(() => {
+          // Sem ruído para quem está avaliando: o fallback local já foi exibido.
+        });
+    };
+
+    atualizar();
+    const cancelar = assinarChaveExterna('semana.' + semanaId, atualizar);
+    return () => {
+      ativo = false;
+      cancelar();
+    };
   }, [semanaId, diaIdx]);
 
   const prato = cardapio?.principal;
@@ -116,8 +144,22 @@ export default function PaginaAvaliar() {
     if (!prato || !qualidade) return;
     try { navigator.vibrate?.(15); } catch { /* sem suporte */ }
 
-    // alimenta aceitação + termômetro + pesquisa de satisfação de uma vez
-    registrarVotoCliente(prato, qualidade, comentario);
+    const voto = qualidade;
+    const textoComentario = comentario;
+
+    // 1) House primeiro: mantém aceitação + termômetro + memória mesmo offline.
+    registrarVotoCliente(prato, voto, textoComentario);
+
+    // 2) Governança depois: espelha no tata_plus sem bloquear a experiência.
+    void enviarAvaliacaoGovernanca({
+      data: new Date(),
+      prato,
+      voto,
+      comentario: textoComentario,
+    }).catch(() => {
+      // O voto já está preservado no House. A sincronização remota é best effort
+      // nesta Fase 1; fila persistente entra somente após provar o contrato vivo.
+    });
 
     setEnviado(true);
     setQualidade(null);
