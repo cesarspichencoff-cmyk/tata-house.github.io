@@ -1,0 +1,73 @@
+name: House Product Architecture temporary gate
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+
+permissions:
+  contents: write
+
+jobs:
+  refactor-and-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply fail-closed product architecture patch
+        run: python3 .github/scripts/house_product_architecture_patch.py
+      - name: Verify information architecture
+        run: |
+          grep -q "rotulo: 'Hoje'" src/components/BottomNav.tsx
+          grep -q "rotulo: 'Planejar'" src/components/BottomNav.tsx
+          grep -q "rotulo: 'Abastecer'" src/components/BottomNav.tsx
+          grep -q "rotulo: 'Analisar'" src/components/BottomNav.tsx
+          grep -q "rotulo: 'Gestão'" src/components/BottomNav.tsx
+          grep -q "titulo: 'Planejamento'" src/app/page.tsx
+          grep -q "rotulo: 'Execução'" src/app/page.tsx
+          grep -q "rotulo: 'Feedback'" src/app/page.tsx
+          grep -q "QR de feedback" src/app/page.tsx
+          grep -q "Base histórica" src/components/cardapio/AbaCardapio.tsx
+          grep -q "Equilíbrio" src/components/cardapio/AbaCardapio.tsx
+          grep -q "Exploração" src/components/cardapio/AbaCardapio.tsx
+          grep -q "Planejamento assistido" src/components/cardapio/PlanejadorGovernanca.tsx
+          grep -q "1. Compor semana" src/components/cardapio/PlanejadorGovernanca.tsx
+          grep -q "2. Validar decisão" src/components/cardapio/PlanejadorGovernanca.tsx
+          grep -q "Enviar proposta" src/components/cardapio/PlanejadorGovernanca.tsx
+      - name: Install dependencies
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_EMAILJS_SERVICE_ID: house-architecture-gate
+          NEXT_PUBLIC_EMAILJS_TEMPLATE_ID: house-architecture-gate
+          NEXT_PUBLIC_EMAILJS_PUBLIC_KEY: house-architecture-gate
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: house-architecture-gate
+          NEXT_PUBLIC_GEMINI_API_KEY: house-architecture-gate
+          NEXT_PUBLIC_GROQ_KEY: house-architecture-gate
+      - name: Diff check
+        run: git diff --check
+      - name: Commit product architecture
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          git add src/app/page.tsx src/components/BottomNav.tsx src/components/cardapio/AbaCardapio.tsx src/components/cardapio/PlanejadorGovernanca.tsx src/lib/cardapio/login.ts
+          git commit -m "refactor(house): organize product information architecture"
+      - name: Remove temporary gate
+        run: |
+          rm .github/workflows/house-product-architecture-temp.yml .github/scripts/house_product_architecture_patch.py
+          git add .github/workflows/house-product-architecture-temp.yml .github/scripts/house_product_architecture_patch.py
+          git commit -m "test(house): remove temporary product architecture gate"
+          git push origin HEAD:feat/house-governanca-phase1
