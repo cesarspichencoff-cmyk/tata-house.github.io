@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import { CenariosGovernanca } from './CenariosGovernanca';
+import { TrocaInteligenteGovernanca } from './TrocaInteligenteGovernanca';
 import {
   lerSemana,
   semanasComConteudo,
@@ -13,6 +14,7 @@ import {
   useFornecedores,
   useHistoricoPrecos,
   useItensExtras,
+  useMostrarBasicos,
   useOfertas,
   usePrecos,
   useSemana,
@@ -120,6 +122,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const { aceitacao } = useAceitacao();
   const { estoque } = useEstoque();
   const { estimativas } = useEstimativas();
+  const { mostrarBasicos } = useMostrarBasicos();
   const historico = useHistoricoPrecos();
 
   const frequenciaRecente = useMemo(() => {
@@ -229,6 +232,20 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               precos={precos}
               estimativas={estimativas}
               fatores={fatores}
+              mostrarBasicos={mostrarBasicos}
+              aceitacao={aceitacao}
+              frequencia={frequenciaRecente}
+              estoque={estoqueQuantidade}
+            />
+
+            <TrocaInteligenteGovernanca
+              semanaId={contexto.semanaId}
+              estado={estado}
+              atualizar={atualizar}
+              precos={precos}
+              estimativas={estimativas}
+              fatores={fatores}
+              mostrarBasicos={mostrarBasicos}
               aceitacao={aceitacao}
               frequencia={frequenciaRecente}
               estoque={estoqueQuantidade}
@@ -236,7 +253,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
               <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
-                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Os geradores antigos continuam disponíveis como ferramenta secundária, mas não substituem a comparação acima.
+                <strong>Ajuste fino:</strong> depois de comparar os cenários ou usar a troca inteligente, altere qualquer dia manualmente. Os geradores antigos continuam disponíveis como ferramenta secundária.
               </div>
               <AbaCardapio
                 estado={estado}
