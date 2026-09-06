@@ -16,6 +16,7 @@ import {
   registrarVotoCliente,
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
+import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';
 import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
 
 type Voto = 'bom' | 'ok' | 'ruim';
@@ -97,9 +98,19 @@ export default function PaginaAvaliar() {
 
   useEffect(() => {
     const atualizar = () => {
-      // O House permanece fonte funcional enquanto nenhum transporte de
-      // Governança estiver oficialmente promovido. Zero dependência de rede.
-      setCardapio(lerCardapioDoDia(semanaId, diaIdx));
+      // Se um canal autorizado já entregou o snapshot da Governança, ele ganha
+      // precedência. Sem snapshot, o House continua exatamente como antes.
+      // Não há rede, endpoint ou dependência de Supabase nesta decisão.
+      const governanca = lerCardapioGovernancaLocal(new Date());
+      setCardapio(
+        governanca
+          ? {
+              principal: governanca.principal,
+              guarnicao: governanca.guarnicao,
+              salada: governanca.salada,
+            }
+          : lerCardapioDoDia(semanaId, diaIdx),
+      );
       setPronto(true);
     };
 
