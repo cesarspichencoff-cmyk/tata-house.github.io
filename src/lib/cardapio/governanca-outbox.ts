@@ -11,6 +11,7 @@
 
 export const CONTRATO_GOVERNANCA = 'tata-house-governanca' as const;
 export const VERSAO_CONTRATO_GOVERNANCA = 1 as const;
+export const LIMITE_PENDENCIAS_GOVERNANCA = 500 as const;
 
 const CHAVE_OUTBOX = 'tata.governanca.outbox.v1';
 const LIMITE_COMENTARIO = 1000;
@@ -179,6 +180,10 @@ export function unidadeHouse(): string {
 /**
  * Registra um evento para sincronização futura. Não faz rede e não depende de
  * backend. Retorna o evento somente quando a persistência local foi confirmada.
+ *
+ * Preservação: a outbox nunca descarta uma pendência antiga para abrir espaço.
+ * Ao atingir o teto, a ponte falha fechada e o registro primário do House segue
+ * independente em /avaliar.
  */
 export function registrarAvaliacaoGovernancaPendente(
   entrada: NovaAvaliacaoGovernanca,
@@ -187,6 +192,9 @@ export function registrarAvaliacaoGovernancaPendente(
 
   const prato = entrada.prato.trim();
   if (!prato) return null;
+
+  const fila = lerFila();
+  if (fila.length >= LIMITE_PENDENCIAS_GOVERNANCA) return null;
 
   const comentario = entrada.comentario?.trim().slice(0, LIMITE_COMENTARIO) || undefined;
   const evento: EventoAvaliacaoGovernancaV1 = {
@@ -202,8 +210,6 @@ export function registrarAvaliacaoGovernancaPendente(
   };
 
   if (!eventoGovernancaValido(evento)) return null;
-
-  const fila = lerFila();
   if (!gravarFila([...fila, evento])) return null;
   return evento;
 }
