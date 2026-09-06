@@ -15,12 +15,6 @@ jobs:
     steps:
       - name: Checkout House
         uses: actions/checkout@v4
-      - name: Checkout Lideres bridge
-        uses: actions/checkout@v4
-        with:
-          repository: cesarspichencoff-cmyk/lideres
-          ref: feat/tatahouse-governanca-phase1
-          path: lideres
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -37,6 +31,12 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: phase1-e2e
           NEXT_PUBLIC_GEMINI_API_KEY: phase1-e2e
           NEXT_PUBLIC_GROQ_KEY: phase1-e2e
+      - name: Checkout Lideres bridge after House build
+        uses: actions/checkout@v4
+        with:
+          repository: cesarspichencoff-cmyk/lideres
+          ref: feat/tatahouse-governanca-phase1
+          path: lideres
       - name: Install Chromium harness
         run: |
           npm install --no-save --package-lock=false playwright@1.55.0
