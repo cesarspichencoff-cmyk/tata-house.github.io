@@ -113,4 +113,66 @@ describe('governanca-outbox', () => {
     });
     expect(evento?.comentario).toHaveLength(1000);
   });
+
+  it('rejeita Date inválida antes de persistir', () => {
+    const evento = registrarAvaliacaoGovernancaPendente({
+      data: new Date('invalida'),
+      prato: 'Peixe',
+      voto: 'bom',
+    });
+    expect(evento).toBeNull();
+    expect(listarPendenciasGovernanca()).toEqual([]);
+  });
+
+  it('filtra registros locais que violam o contrato v1', () => {
+    window.localStorage.setItem(
+      'tata.governanca.outbox.v1',
+      JSON.stringify([
+        {
+          id: 'ok-1',
+          tipo: 'avaliacao.prato',
+          origem: 'tata-house',
+          criadoEm: '2026-09-05T15:00:00.000Z',
+          data: '2026-09-05',
+          unidade: 'tata-house',
+          prato: 'Frango',
+          voto: 'bom',
+        },
+        {
+          id: 'data-impossivel',
+          tipo: 'avaliacao.prato',
+          origem: 'tata-house',
+          criadoEm: '2026-09-05T15:00:00.000Z',
+          data: '2026-02-31',
+          unidade: 'tata-house',
+          prato: 'Peixe',
+          voto: 'ok',
+        },
+        {
+          id: 'campo-extra',
+          tipo: 'avaliacao.prato',
+          origem: 'tata-house',
+          criadoEm: '2026-09-05T15:00:00.000Z',
+          data: '2026-09-05',
+          unidade: 'tata-house',
+          prato: 'Carne',
+          voto: 'ruim',
+          segredo: 'não pertence ao contrato',
+        },
+        {
+          id: 'comentario-longo',
+          tipo: 'avaliacao.prato',
+          origem: 'tata-house',
+          criadoEm: '2026-09-05T15:00:00.000Z',
+          data: '2026-09-05',
+          unidade: 'tata-house',
+          prato: 'Massa',
+          voto: 'bom',
+          comentario: 'x'.repeat(1001),
+        },
+      ]),
+    );
+
+    expect(listarPendenciasGovernanca().map((e) => e.id)).toEqual(['ok-1']);
+  });
 });
