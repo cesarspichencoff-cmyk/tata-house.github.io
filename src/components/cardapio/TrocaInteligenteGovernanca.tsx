@@ -138,22 +138,22 @@ export function TrocaInteligenteGovernanca({
   const [motivo, setMotivo] = useState<MotivoSubstituicao | ''>('');
   const [mensagem, setMensagem] = useState('');
   const { registros, registrar } = useSubstituicoes();
+  const atual = estado.dias[diaIndice]?.principal ?? '';
 
   useEffect(() => {
-    if (!estado.dias[diaIndice]?.principal && primeiroPreenchido >= 0) setDiaIndice(primeiroPreenchido);
-  }, [diaIndice, estado.dias, primeiroPreenchido]);
+    if (!atual && primeiroPreenchido >= 0) setDiaIndice(primeiroPreenchido);
+  }, [atual, primeiroPreenchido]);
 
   useEffect(() => {
     setAlternativas([]);
     setMotivo('');
     setMensagem('');
-  }, [diaIndice, estado.dias[diaIndice]?.principal]);
+  }, [diaIndice, atual]);
 
   const permissao = useMemo(
     () => podeAplicarTrocaGovernanca(estado, diaIndice),
     [estado, diaIndice],
   );
-  const atual = estado.dias[diaIndice]?.principal ?? '';
 
   const buscar = () => {
     if (!atual.trim()) {
