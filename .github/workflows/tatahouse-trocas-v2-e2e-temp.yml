@@ -1,0 +1,178 @@
+name: TATÁ House trocas inteligentes V2 E2E (temp)
+
+on:
+  push:
+    branches:
+      - feat/house-governanca-phase1
+    paths:
+      - '.github/workflows/tatahouse-trocas-v2-e2e-temp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build current House feature
+        run: npm ci && npm run build
+      - uses: actions/checkout@v4
+        with:
+          repository: cesarspichencoff-cmyk/lideres
+          ref: feat/tatahouse-governanca-phase1
+          path: leaders
+      - name: Install Playwright Chromium
+        run: |
+          mkdir -p /tmp/tatahouse-trocas-e2e
+          cd /tmp/tatahouse-trocas-e2e
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Prepare exact-origin harness
+        run: |
+          cat > /tmp/tatahouse-trocas-cert.cnf <<'EOF'
+          [req]
+          distinguished_name=req_dn
+          x509_extensions=v3_req
+          prompt=no
+          [req_dn]
+          CN=tatahouse-trocas-e2e
+          [v3_req]
+          subjectAltName=@alt_names
+          [alt_names]
+          DNS.1=tata-house.github.io
+          DNS.2=lideres.tatasushi.tech
+          EOF
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout /tmp/tatahouse-trocas-key.pem -out /tmp/tatahouse-trocas-cert.pem -config /tmp/tatahouse-trocas-cert.cnf >/dev/null 2>&1
+          cat > /tmp/tatahouse-trocas-e2e.cjs <<'NODE'
+          const https=require('https'),fs=require('fs'),path=require('path');
+          const mode=process.argv[2],root=process.env.GITHUB_WORKSPACE;
+          const houseRoot=path.join(root,'out'),leadersRoot=path.join(root,'leaders');
+          const HOUSE='https://tata-house.github.io';
+          const harness=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;min-height:100%}iframe{display:block;width:100%;height:100vh;border:0}</style></head><body>
+          <script src="/compliance/kpis/tatahouse/house_governanca_planejador_v1.js"><\/script>
+          <iframe id="house" src="${HOUSE}/planejar.html"></iframe>
+          <script>(function(){window.__statuses=[];window.__draft=null;var api=window.TataHouseGovernancaPlanejadorV1,frame=document.getElementById('house');var ctx=api.criarContexto({semanaId:'2026-S37',unidadeFonte:'Itaim'});window.__disconnect=api.conectarIframe(frame,ctx,{aoStatus:function(s,p){window.__statuses.push({s:s,p:p||null})},aoDraft:function(r){window.__draft=r}})})();<\/script>
+          </body></html>`;
+          function mime(f){if(f.endsWith('.html'))return'text/html; charset=utf-8';if(f.endsWith('.js')||f.endsWith('.mjs'))return'application/javascript; charset=utf-8';if(f.endsWith('.css'))return'text/css; charset=utf-8';if(f.endsWith('.json'))return'application/json';if(f.endsWith('.svg'))return'image/svg+xml';if(f.endsWith('.png'))return'image/png';if(f.endsWith('.webp'))return'image/webp';if(f.endsWith('.woff2'))return'font/woff2';return'application/octet-stream'}
+          function send(res,c,b,t='text/plain; charset=utf-8'){res.writeHead(c,{'content-type':t,'cache-control':'no-store'});res.end(b)}
+          function serve(res,base,p){let rel=decodeURIComponent(p);while(rel.startsWith('/'))rel=rel.slice(1);if(!rel)rel='index.html';if(rel.endsWith('/'))rel+='index.html';const br=path.resolve(base),f=path.resolve(base,rel);if(!f.startsWith(br+path.sep)&&f!==br)return send(res,403,'forbidden');try{if(!fs.statSync(f).isFile())return send(res,404,'not found');res.writeHead(200,{'content-type':mime(f),'cache-control':'no-store'});fs.createReadStream(f).pipe(res)}catch{return send(res,404,'not found')}}
+          function server(){https.createServer({key:fs.readFileSync('/tmp/tatahouse-trocas-key.pem'),cert:fs.readFileSync('/tmp/tatahouse-trocas-cert.pem')},(req,res)=>{const host=(req.headers.host||'').split(':')[0],p=new URL(req.url,'https://'+host).pathname;if(host==='lideres.tatasushi.tech'){if(p==='/harness.html')return send(res,200,harness,'text/html; charset=utf-8');return serve(res,leadersRoot,p)}if(host==='tata-house.github.io')return serve(res,houseRoot,p);return send(res,421,'unknown host')}).listen(443,'0.0.0.0',()=>console.log('TROCAS_E2E_SERVER=READY'))}
+          async function test(){
+            const {chromium}=require('/tmp/tatahouse-trocas-e2e/node_modules/playwright');
+            const browser=await chromium.launch({headless:true,args:['--host-resolver-rules=MAP tata-house.github.io 127.0.0.1, MAP lideres.tatasushi.tech 127.0.0.1','--no-proxy-server']});
+            const context=await browser.newContext({ignoreHTTPSErrors:true,viewport:{width:1440,height:1000},timezoneId:'America/Sao_Paulo'});
+            await context.route('**/*',async route=>{const u=new URL(route.request().url());if(u.hostname==='tata-house.github.io'||u.hostname==='lideres.tatasushi.tech')return route.continue();return route.abort()});
+            await context.addInitScript(()=>{if(location.hostname==='tata-house.github.io')localStorage.setItem('cardapio.v1.mostrarBasicos','true')});
+            const page=await context.newPage();
+            await page.goto('https://lideres.tatasushi.tech/harness.html',{waitUntil:'domcontentloaded'});
+            await page.waitForFunction(()=>window.__statuses.some(x=>x.s==='contexto-confirmado'),null,{timeout:15000});
+            const frame=page.frames().find(f=>f.url().startsWith('https://tata-house.github.io/planejar'));
+            if(!frame)throw new Error('House planejar frame missing');
+            console.log('TROCAS_E2E_CONTEXT=PASS');
+
+            await frame.getByTestId('gerar-cenarios').click();
+            await frame.getByTestId('lista-cenarios').waitFor({state:'visible',timeout:20000});
+            const scenarioCards=frame.locator('[data-testid^="cenario-"]');
+            let chosen=null;
+            for(let i=0;i<await scenarioCards.count();i++){const c=scenarioCards.nth(i);if(!/\d+ erro/.test(await c.innerText())){chosen=c;break}}
+            if(!chosen)throw new Error('no applicable scenario');
+            const sid=(await chosen.getAttribute('data-testid')).replace('cenario-','');
+            await frame.getByTestId('aplicar-'+sid).click();
+            await frame.waitForFunction(()=>/Cenário aplicado somente ao rascunho local/i.test(document.querySelector('[data-testid="mensagem-cenarios"]')?.textContent||''),null,{timeout:10000});
+            console.log('TROCAS_E2E_BASE_DRAFT=PASS '+sid);
+
+            const troca=frame.getByTestId('troca-inteligente');
+            await troca.waitFor({state:'visible'});
+            const original=await frame.getByTestId('troca-prato-atual').innerText();
+            await frame.getByTestId('buscar-trocas').click();
+            await frame.getByTestId('lista-trocas').waitFor({state:'visible',timeout:20000});
+            const alternativas=frame.getByTestId('lista-trocas').locator('article');
+            if(await alternativas.count()<1)throw new Error('no smart alternatives');
+            const first=alternativas.first();
+            const apply=first.locator('button[data-testid^="aplicar-troca-"]');
+            if(!(await apply.isDisabled()))throw new Error('apply must require human reason');
+            console.log('TROCAS_E2E_REASON_REQUIRED=PASS');
+            const text=await first.innerText();
+            for(const label of ['Custo/ref.','Aceitação','Recente','Estoque','Impacto desta troca'])if(!text.includes(label))throw new Error('missing impact evidence '+label);
+            console.log('TROCAS_E2E_IMPACT_EVIDENCE=PASS');
+
+            await frame.getByTestId('motivo-troca').selectOption('variedade');
+            let applicable=null;
+            for(let i=0;i<await alternativas.count();i++){const c=alternativas.nth(i),b=c.locator('button[data-testid^="aplicar-troca-"]');if(!(await b.isDisabled())){applicable=c;break}}
+            if(!applicable)throw new Error('no non-blocked smart alternative');
+            const newName=(await applicable.locator('h4').innerText()).trim();
+            await applicable.locator('button[data-testid^="aplicar-troca-"]').click();
+            await frame.waitForFunction(()=>/Troca aplicada apenas ao rascunho/i.test(document.querySelector('[data-testid="mensagem-troca"]')?.textContent||''),null,{timeout:10000});
+            const current=await frame.getByTestId('troca-prato-atual').innerText();
+            if(current.trim()!==newName||current.trim()===original.trim())throw new Error('smart swap not applied');
+            const subs=await frame.evaluate(()=>JSON.parse(localStorage.getItem('cardapio.v1.substituicoes')||'[]'));
+            const reg=subs.find(x=>x.semanaId==='2026-S37'&&x.dia===0&&x.nomeOriginal===original&&x.nomeSubstituto===newName);
+            if(!reg||reg.motivo!=='variedade')throw new Error('substitution learning record missing');
+            console.log('TROCAS_E2E_APPLY_AND_LEARN=PASS');
+
+            // Injeta evidência operacional no dia seguinte e recarrega: a UI deve falhar fechada.
+            await frame.evaluate(()=>{const k='cardapio.v1.semana.2026-S37',s=JSON.parse(localStorage.getItem(k));s.ajustes=s.ajustes||{};s.ajustes[1]={sal:{qtd:1}};localStorage.setItem(k,JSON.stringify(s));location.reload()});
+            await page.waitForFunction(()=>window.__statuses.filter(x=>x.s==='contexto-confirmado').length>=2,null,{timeout:15000});
+            const frame2=page.frames().find(f=>f.url().startsWith('https://tata-house.github.io/planejar'));
+            await frame2.getByTestId('troca-inteligente').waitFor({state:'visible',timeout:15000});
+            await frame2.getByTestId('troca-dia-1').click();
+            const blockedText=await frame2.getByTestId('troca-inteligente').innerText();
+            if(!/dados operacionais vinculados/i.test(blockedText))throw new Error('operational evidence fail-closed message absent');
+            await frame2.getByTestId('buscar-trocas').click();
+            await frame2.getByTestId('lista-trocas').waitFor({state:'visible',timeout:20000});
+            await frame2.getByTestId('motivo-troca').selectOption('preco');
+            const blockedButtons=frame2.locator('button[data-testid^="aplicar-troca-"]');
+            for(let i=0;i<await blockedButtons.count();i++)if(!(await blockedButtons.nth(i).isDisabled()))throw new Error('evidence-linked day allowed auto swap');
+            console.log('TROCAS_E2E_OPERATIONAL_EVIDENCE_BLOCK=PASS');
+
+            // Remove somente a evidência sintética do harness para comprovar que o fluxo de envio segue íntegro.
+            await frame2.evaluate(()=>{const k='cardapio.v1.semana.2026-S37',s=JSON.parse(localStorage.getItem(k));delete s.ajustes[1];localStorage.setItem(k,JSON.stringify(s));location.reload()});
+            await page.waitForFunction(()=>window.__statuses.filter(x=>x.s==='contexto-confirmado').length>=3,null,{timeout:15000});
+            const frame3=page.frames().find(f=>f.url().startsWith('https://tata-house.github.io/planejar'));
+            const send=frame3.getByRole('button',{name:'Enviar proposta'});
+            if(await send.isDisabled())throw new Error('draft unexpectedly blocked after clean swap');
+            await send.click();
+            await page.waitForFunction(()=>window.__draft&&window.__draft.dias&&window.__draft.dias.length===7,null,{timeout:10000});
+            const draft=await page.evaluate(()=>window.__draft);
+            if(draft.dias[0].principal!==newName)throw new Error('governance draft lost smart substitution');
+            const receipt=await page.evaluate(()=>JSON.parse(localStorage.getItem('tata.governanca.planejamentos.v1')||'[]'));
+            if(!receipt.length||receipt[0].proposalId!==draft.proposalId)throw new Error('governance receipt missing');
+            console.log('TROCAS_E2E_GOVERNANCE_ACK=PASS');
+
+            fs.mkdirSync('/tmp/tatahouse-trocas-shots',{recursive:true});
+            await page.screenshot({path:'/tmp/tatahouse-trocas-shots/01-troca-desktop.png',fullPage:true});
+            await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);
+            const overflow=await frame3.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
+            if(overflow>2)throw new Error('mobile overflow '+overflow);
+            await page.screenshot({path:'/tmp/tatahouse-trocas-shots/02-troca-mobile.png',fullPage:true});
+            console.log('TROCAS_E2E_MOBILE=PASS');
+            await browser.close();
+            console.log('HOUSE_GOVERNANCA_TROCAS_V2_E2E=PASS');
+          }
+          if(mode==='server')server();else if(mode==='test')test().catch(e=>{console.error(e);process.exit(1)});else process.exit(2);
+          NODE
+          node --check /tmp/tatahouse-trocas-e2e.cjs
+      - name: Start exact-origin harness
+        run: |
+          sudo -E node /tmp/tatahouse-trocas-e2e.cjs server >/tmp/tatahouse-trocas-server.log 2>&1 &
+          for i in $(seq 1 20); do
+            if curl --noproxy '*' --resolve lideres.tatasushi.tech:443:127.0.0.1 -ksSf https://lideres.tatasushi.tech/harness.html >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/tatahouse-trocas-server.log
+          exit 1
+      - name: Prove smart substitution decision flow
+        run: node /tmp/tatahouse-trocas-e2e.cjs test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tatahouse-trocas-v2-visual-proof
+          path: /tmp/tatahouse-trocas-shots/*.png
+          if-no-files-found: ignore
