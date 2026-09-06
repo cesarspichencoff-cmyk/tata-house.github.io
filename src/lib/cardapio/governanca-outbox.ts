@@ -14,6 +14,7 @@ export const VERSAO_CONTRATO_GOVERNANCA = 1 as const;
 
 const CHAVE_OUTBOX = 'tata.governanca.outbox.v1';
 const LIMITE_COMENTARIO = 1000;
+const DATA_HORA_RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const CAMPOS_EVENTO = new Set([
   'id',
   'tipo',
@@ -106,7 +107,7 @@ function dataValida(v: string): boolean {
 }
 
 function dataHoraValida(v: string): boolean {
-  return Boolean(v && !Number.isNaN(Date.parse(v)));
+  return DATA_HORA_RFC3339.test(v) && !Number.isNaN(Date.parse(v));
 }
 
 function eventoGovernancaValido(v: unknown): v is EventoAvaliacaoGovernancaV1 {
