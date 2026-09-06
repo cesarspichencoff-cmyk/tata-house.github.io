@@ -1,0 +1,214 @@
+name: House governance source unit gate v2
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+    paths: [.github/workflows/house-governanca-source-unit-v2-temp.yml]
+permissions:
+  contents: write
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Add publication source-unit context without touching identity context
+        run: |
+          test -f src/lib/cardapio/governanca-contexto.ts
+          grep -q 'instalarContextoGovernanca' src/lib/cardapio/governanca-contexto.ts
+          cat > src/lib/cardapio/governanca-unidade-fonte.ts <<'TS'
+          'use client';
+
+          const CHAVE_UNIDADE_FONTE = 'tata.governanca.unidade-fonte.v1';
+          const DATA_RE = /^\d{4}-\d{2}-\d{2}$/;
+          const DATA_HORA_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+          const CAMPOS = new Set(['data', 'unidadeFonte', 'recebidoEm']);
+
+          export interface UnidadeFonteGovernancaV1 {
+            data: string;
+            unidadeFonte: string;
+            recebidoEm: string;
+          }
+
+          function storageDisponivel(): Storage | null {
+            if (typeof window === 'undefined') return null;
+            try { return window.localStorage; } catch { return null; }
+          }
+
+          function texto(v: unknown): string { return typeof v === 'string' ? v.trim() : ''; }
+
+          function dataValida(v: string): boolean {
+            if (!DATA_RE.test(v)) return false;
+            const [ano, mes, dia] = v.split('-').map(Number);
+            const d = new Date(Date.UTC(ano, mes - 1, dia));
+            return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+          }
+
+          function dataHoraValida(v: string): boolean {
+            return DATA_HORA_RE.test(v) && !Number.isNaN(Date.parse(v));
+          }
+
+          function dataLocalIso(data: Date): string {
+            return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+          }
+
+          export function normalizarUnidadeFonteGovernanca(v: unknown): UnidadeFonteGovernancaV1 | null {
+            if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+            if (Object.keys(v).some((k) => !CAMPOS.has(k))) return null;
+            const c = v as Partial<UnidadeFonteGovernancaV1>;
+            const data = texto(c.data);
+            const unidadeFonte = texto(c.unidadeFonte);
+            const recebidoEm = texto(c.recebidoEm);
+            if (!dataValida(data) || !unidadeFonte || unidadeFonte.length > 120 || !dataHoraValida(recebidoEm)) return null;
+            return { data, unidadeFonte, recebidoEm };
+          }
+
+          export function salvarUnidadeFonteGovernancaLocal(
+            entrada: { data: string; unidadeFonte: string; recebidoEm?: string },
+          ): UnidadeFonteGovernancaV1 | null {
+            const registro = normalizarUnidadeFonteGovernanca({
+              data: entrada.data,
+              unidadeFonte: entrada.unidadeFonte,
+              recebidoEm: entrada.recebidoEm ?? new Date().toISOString(),
+            });
+            const storage = storageDisponivel();
+            if (!registro || !storage) return null;
+            try {
+              storage.setItem(CHAVE_UNIDADE_FONTE, JSON.stringify(registro));
+              return { ...registro };
+            } catch { return null; }
+          }
+
+          export function lerUnidadeFonteGovernancaLocal(data: Date = new Date()): UnidadeFonteGovernancaV1 | null {
+            const storage = storageDisponivel();
+            if (!storage || Number.isNaN(data.getTime())) return null;
+            try {
+              const raw = storage.getItem(CHAVE_UNIDADE_FONTE);
+              if (!raw) return null;
+              const registro = normalizarUnidadeFonteGovernanca(JSON.parse(raw));
+              if (!registro || registro.data !== dataLocalIso(data)) return null;
+              return { ...registro };
+            } catch { return null; }
+          }
+
+          export function unidadeFonteGovernancaLocal(data: Date = new Date()): string | null {
+            return lerUnidadeFonteGovernancaLocal(data)?.unidadeFonte ?? null;
+          }
+          TS
+
+          cat > src/lib/cardapio/governanca-unidade-fonte.test.ts <<'TS'
+          import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+          import {
+            lerUnidadeFonteGovernancaLocal,
+            normalizarUnidadeFonteGovernanca,
+            salvarUnidadeFonteGovernancaLocal,
+            unidadeFonteGovernancaLocal,
+          } from './governanca-unidade-fonte';
+
+          function memoriaStorage(): Storage {
+            const dados = new Map<string, string>();
+            return {
+              get length(){ return dados.size; }, clear(){ dados.clear(); },
+              getItem(k){ return dados.get(k) ?? null; }, key(i){ return Array.from(dados.keys())[i] ?? null; },
+              removeItem(k){ dados.delete(k); }, setItem(k,v){ dados.set(k,v); }
+            };
+          }
+
+          beforeEach(()=>vi.stubGlobal('window',{ localStorage: memoriaStorage() }));
+          afterEach(()=>{ vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+          describe('governanca-unidade-fonte',()=>{
+            it('guarda a unidade fonte somente para a mesma data',()=>{
+              expect(salvarUnidadeFonteGovernancaLocal({data:'2026-09-06',unidadeFonte:'Itaim',recebidoEm:'2026-09-06T10:00:00.000Z'})).toMatchObject({unidadeFonte:'Itaim'});
+              expect(unidadeFonteGovernancaLocal(new Date(2026,8,6))).toBe('Itaim');
+              expect(lerUnidadeFonteGovernancaLocal(new Date(2026,8,7))).toBeNull();
+            });
+            it('rejeita data impossível, timestamp inválido e campos extras',()=>{
+              expect(normalizarUnidadeFonteGovernanca({data:'2026-02-31',unidadeFonte:'Itaim',recebidoEm:'2026-09-06T10:00:00.000Z'})).toBeNull();
+              expect(normalizarUnidadeFonteGovernanca({data:'2026-09-06',unidadeFonte:'Itaim',recebidoEm:'ontem'})).toBeNull();
+              expect(normalizarUnidadeFonteGovernanca({data:'2026-09-06',unidadeFonte:'Itaim',recebidoEm:'2026-09-06T10:00:00.000Z',extra:true})).toBeNull();
+            });
+          });
+          TS
+      - name: Patch handoff and evaluation page fail-closed
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/lib/cardapio/governanca-handoff.ts'); s=p.read_text()
+          a="""import {\n  salvarSnapshotCardapioGovernancaLocal,\n  type CardapioGovernancaDiaV1,\n} from './governanca-cardapio';\n"""
+          b=a+"import { salvarUnidadeFonteGovernancaLocal } from './governanca-unidade-fonte';\n"
+          if s.count(a)!=1: raise SystemExit('handoff import anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""interface MensagemCardapioV1 {\n  type: typeof GOV_HANDOFF_CARDAPIO_V1;\n  correlationId?: string;\n  payload?: unknown;\n}\n"""
+          b="""interface MensagemCardapioV1 {\n  type: typeof GOV_HANDOFF_CARDAPIO_V1;\n  correlationId?: string;\n  sourceUnit?: string;\n  payload?: unknown;\n}\n"""
+          if s.count(a)!=1: raise SystemExit('message anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""  correlationId?: string;\n  snapshot?: CardapioGovernancaDiaV1;\n}\n"""
+          b="""  correlationId?: string;\n  unidadeFonte?: string;\n  snapshot?: CardapioGovernancaDiaV1;\n}\n"""
+          if s.count(a)!=1: raise SystemExit('result anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""  const correlationId = texto(mensagem.correlationId) || undefined;\n  const snapshot = salvarSnapshotCardapioGovernancaLocal(mensagem.payload);\n"""
+          b="""  const correlationId = texto(mensagem.correlationId) || undefined;\n  const unidadeFonte = texto(mensagem.sourceUnit).slice(0, 120) || undefined;\n  const snapshot = salvarSnapshotCardapioGovernancaLocal(mensagem.payload);\n"""
+          if s.count(a)!=1: raise SystemExit('source parse anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""    ...(correlationId ? { correlationId } : {}),\n    snapshot,\n  };\n"""
+          b="""    ...(correlationId ? { correlationId } : {}),\n    ...(unidadeFonte ? { unidadeFonte } : {}),\n    snapshot,\n  };\n"""
+          if s.count(a)!=1: raise SystemExit('result return anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""    if (resultado.aceito && resultado.snapshot) {\n      aoImportar?.(resultado.snapshot);\n    }\n"""
+          b="""    if (resultado.aceito && resultado.snapshot) {\n      if (resultado.unidadeFonte) {\n        salvarUnidadeFonteGovernancaLocal({\n          data: resultado.snapshot.data,\n          unidadeFonte: resultado.unidadeFonte,\n        });\n      }\n      aoImportar?.(resultado.snapshot);\n    }\n"""
+          if s.count(a)!=1: raise SystemExit('source save anchor mismatch')
+          p.write_text(s.replace(a,b,1))
+
+          p=Path('src/app/avaliar/page.tsx'); s=p.read_text()
+          a="""import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';\n"""
+          b=a+"import { unidadeFonteGovernancaLocal } from '@/lib/cardapio/governanca-unidade-fonte';\n"
+          if s.count(a)!=1: raise SystemExit('page import anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""      comentario: textoComentario,\n    });\n"""
+          b="""      comentario: textoComentario,\n      unidade: unidadeFonteGovernancaLocal(new Date()) ?? undefined,\n    });\n"""
+          if s.count(a)!=1: raise SystemExit('page unit anchor mismatch')
+          p.write_text(s.replace(a,b,1))
+
+          p=Path('src/lib/cardapio/governanca-handoff.test.ts'); s=p.read_text()
+          a="""    correlationId: 'corr-001',\n    payload: {\n"""
+          b="""    correlationId: 'corr-001',\n    sourceUnit: 'Itaim',\n    payload: {\n"""
+          if s.count(a)!=1: raise SystemExit('handoff test message anchor mismatch')
+          s=s.replace(a,b,1)
+          a="""    expect(resultado.correlationId).toBe('corr-001');\n    expect(resultado.snapshot?.principal).toBe('Frango grelhado');\n"""
+          b="""    expect(resultado.correlationId).toBe('corr-001');\n    expect(resultado.unidadeFonte).toBe('Itaim');\n    expect(resultado.snapshot?.principal).toBe('Frango grelhado');\n"""
+          if s.count(a)!=1: raise SystemExit('handoff test expectation anchor mismatch')
+          p.write_text(s.replace(a,b,1))
+          PY
+      - name: Targeted gates
+        run: npx vitest run src/lib/cardapio/governanca-unidade-fonte.test.ts src/lib/cardapio/governanca-handoff.test.ts src/lib/cardapio/governanca-outbox.test.ts src/lib/cardapio/governanca-sync.test.ts
+      - name: Full quality gates
+        run: |
+          npm run typecheck
+          npm run lint
+          git diff --check
+          grep -q 'instalarContextoGovernanca' src/lib/cardapio/governanca-contexto.ts
+      - name: Commit functional traceability
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          git add src/lib/cardapio/governanca-unidade-fonte.ts src/lib/cardapio/governanca-unidade-fonte.test.ts src/lib/cardapio/governanca-handoff.ts src/lib/cardapio/governanca-handoff.test.ts src/app/avaliar/page.tsx
+          git commit -m "feat(house): preserve publication source unit in feedback outbox"
+          git push origin HEAD:feat/house-governanca-phase1
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          git fetch origin feat/house-governanca-phase1
+          git reset --hard origin/feat/house-governanca-phase1
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          rm -f .github/workflows/house-governanca-source-unit-v2-temp.yml
+          git add .github/workflows/house-governanca-source-unit-v2-temp.yml
+          git commit -m "test(house): remove temporary source-unit v2 gate" || exit 0
+          git push origin HEAD:feat/house-governanca-phase1
