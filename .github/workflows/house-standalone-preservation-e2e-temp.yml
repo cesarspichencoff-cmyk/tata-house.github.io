@@ -1,0 +1,111 @@
+name: House standalone preservation E2E temporary
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+    paths: [.github/workflows/house-standalone-preservation-e2e-temp.yml]
+permissions:
+  contents: write
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Build standalone House
+        env:
+          NEXT_PUBLIC_GOVERNANCA_SUPABASE_URL: ''
+          NEXT_PUBLIC_GOVERNANCA_SUPABASE_KEY: ''
+          NEXT_PUBLIC_GOVERNANCA_SUPABASE_PUBLISHABLE_KEY: ''
+        run: |
+          npm ci
+          npm run build
+      - name: Install Chromium
+        run: |
+          mkdir -p /tmp/house-standalone && cd /tmp/house-standalone
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+      - name: Start House
+        run: |
+          npm run start -- -p 4173 >/tmp/house-standalone.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ >/dev/null && exit 0; sleep 1; done
+          cat /tmp/house-standalone.log; exit 1
+      - name: Prove standalone preservation
+        run: |
+          cat > /tmp/house-standalone/proof.cjs <<'NODE'
+          const { chromium } = require('/tmp/house-standalone/node_modules/playwright');
+          const assert = (v, m) => { if (!v) throw new Error(m); };
+          const base = 'http://127.0.0.1:4173';
+          const roles = [
+            { perfil:'gerencia', papel:'administrador', visible:['Hoje','Planejar','Abastecer','Analisar','Gestão'], hidden:[] },
+            { perfil:'compras', papel:'compras', visible:['Abastecer','Analisar'], hidden:['Hoje','Planejar','Gestão'] },
+            { perfil:'cozinha', papel:'cozinha', visible:['Hoje','Planejar','Abastecer'], hidden:['Analisar','Gestão'] },
+          ];
+          (async()=>{
+            const browser = await chromium.launch({headless:true});
+            try {
+              for (const role of roles) {
+                const context = await browser.newContext({ viewport:{width:1440,height:1000} });
+                await context.addInitScript(({perfil,papel})=>{
+                  localStorage.setItem('cardapio.v1.login.perfil', JSON.stringify(perfil));
+                  localStorage.setItem('cardapio.v1.papel', JSON.stringify(papel));
+                }, role);
+                const page = await context.newPage();
+                const errors=[]; page.on('pageerror', e=>errors.push(String(e)));
+                await page.goto(base+'/', {waitUntil:'networkidle'});
+                for (const label of role.visible) {
+                  assert(await page.getByRole('button',{name:label,exact:true}).count() >= 1, role.perfil+' não vê '+label);
+                }
+                for (const label of role.hidden) {
+                  assert(await page.getByRole('button',{name:label,exact:true}).count() === 0, role.perfil+' vê aba indevida '+label);
+                }
+                const state = await page.evaluate(()=>({
+                  perfil: localStorage.getItem('cardapio.v1.login.perfil'),
+                  papel: localStorage.getItem('cardapio.v1.papel'),
+                  govLocal: Object.keys(localStorage).filter(k=>k.startsWith('tata.governanca.')),
+                  govSession: Object.keys(sessionStorage).filter(k=>k.startsWith('tata.governanca.')),
+                }));
+                assert(state.perfil===JSON.stringify(role.perfil),'perfil mudou '+JSON.stringify(state));
+                assert(state.papel===JSON.stringify(role.papel),'papel mudou '+JSON.stringify(state));
+                assert(state.govSession.length===0,'contexto Governança surgiu sozinho '+JSON.stringify(state.govSession));
+                assert(errors.length===0,'pageerror '+role.perfil+': '+errors.join(' | '));
+                await context.close();
+              }
+              {
+                const context=await browser.newContext({viewport:{width:390,height:844}});
+                const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+                const r=await page.goto(base+'/avaliar',{waitUntil:'networkidle'});
+                assert(r && r.ok(),'/avaliar não carregou');
+                assert(errors.length===0,'/avaliar pageerror: '+errors.join(' | '));
+                await context.close();
+              }
+              {
+                const context=await browser.newContext({viewport:{width:390,height:844}});
+                const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+                const r=await page.goto(base+'/planejar',{waitUntil:'networkidle'});
+                assert(r && r.ok(),'/planejar não carregou');
+                assert(errors.length===0,'/planejar pageerror: '+errors.join(' | '));
+                await context.close();
+              }
+              console.log('HOUSE_STANDALONE_PRESERVATION=PASS');
+            } finally { await browser.close(); }
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node /tmp/house-standalone/proof.cjs
+      - name: Diff hygiene
+        run: git diff --check 6dc04827b195aaca9d4653618e5a40ca64a1a6f4...HEAD
+      - name: Remove temporary browser proof
+        if: always()
+        run: |
+          git config user.name "cesarspichencoff-cmyk"
+          git config user.email "cesar.spichencoff@gmail.com"
+          rm -f .github/workflows/house-standalone-preservation-e2e-temp.yml
+          git add .github/workflows/house-standalone-preservation-e2e-temp.yml
+          git commit -m "test(house): remove temporary standalone preservation proof" || exit 0
+          git push origin HEAD:feat/house-governanca-phase1
