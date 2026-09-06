@@ -4,6 +4,7 @@ import {
   salvarSnapshotCardapioGovernancaLocal,
   type CardapioGovernancaDiaV1,
 } from './governanca-cardapio';
+import { salvarUnidadeFonteGovernancaLocal } from './governanca-unidade-fonte';
 
 export const GOV_HANDOFF_READY_V1 = 'tata-house:governanca:ready:v1' as const;
 export const GOV_HANDOFF_CARDAPIO_V1 = 'tata-house:governanca:cardapio:v1' as const;
@@ -13,6 +14,7 @@ export const ORIGEM_GOVERNANCA_V1 = 'https://lideres.tatasushi.tech' as const;
 interface MensagemCardapioV1 {
   type: typeof GOV_HANDOFF_CARDAPIO_V1;
   correlationId?: string;
+  sourceUnit?: string;
   payload?: unknown;
 }
 
@@ -20,6 +22,7 @@ export interface ResultadoHandoffGovernanca {
   tratado: boolean;
   aceito: boolean;
   correlationId?: string;
+  unidadeFonte?: string;
   snapshot?: CardapioGovernancaDiaV1;
 }
 
@@ -47,6 +50,7 @@ export function processarMensagemCardapioGovernanca(
   }
 
   const correlationId = texto(mensagem.correlationId) || undefined;
+  const unidadeFonte = texto(mensagem.sourceUnit).slice(0, 120) || undefined;
   const snapshot = salvarSnapshotCardapioGovernancaLocal(mensagem.payload);
   if (!snapshot) {
     return { tratado: true, aceito: false, ...(correlationId ? { correlationId } : {}) };
@@ -56,6 +60,7 @@ export function processarMensagemCardapioGovernanca(
     tratado: true,
     aceito: true,
     ...(correlationId ? { correlationId } : {}),
+    ...(unidadeFonte ? { unidadeFonte } : {}),
     snapshot,
   };
 }
@@ -93,6 +98,12 @@ export function instalarHandoffCardapioGovernanca(
     }
 
     if (resultado.aceito && resultado.snapshot) {
+      if (resultado.unidadeFonte) {
+        salvarUnidadeFonteGovernancaLocal({
+          data: resultado.snapshot.data,
+          unidadeFonte: resultado.unidadeFonte,
+        });
+      }
       aoImportar?.(resultado.snapshot);
     }
   };

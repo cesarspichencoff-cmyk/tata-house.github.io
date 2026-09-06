@@ -35,6 +35,7 @@ function mensagemValida() {
   return {
     type: GOV_HANDOFF_CARDAPIO_V1,
     correlationId: 'corr-001',
+    sourceUnit: 'Itaim',
     payload: {
       contrato: 'tata-house-governanca',
       versao: 1,
@@ -68,6 +69,7 @@ describe('governanca-handoff', () => {
     expect(resultado.tratado).toBe(true);
     expect(resultado.aceito).toBe(true);
     expect(resultado.correlationId).toBe('corr-001');
+    expect(resultado.unidadeFonte).toBe('Itaim');
     expect(resultado.snapshot?.principal).toBe('Frango grelhado');
     expect(lerCardapioGovernancaLocal(new Date(2026, 8, 5))?.principal).toBe('Frango grelhado');
   });

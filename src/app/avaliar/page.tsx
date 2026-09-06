@@ -17,6 +17,7 @@ import {
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
 import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';
+import { unidadeFonteGovernancaLocal } from '@/lib/cardapio/governanca-unidade-fonte';
 import { instalarHandoffCardapioGovernanca } from '@/lib/cardapio/governanca-handoff';
 import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
 import { criarTransportePostMessageGovernanca } from '@/lib/cardapio/governanca-postmessage';
@@ -165,6 +166,7 @@ export default function PaginaAvaliar() {
       prato,
       voto,
       comentario: textoComentario,
+      unidade: unidadeFonteGovernancaLocal(new Date()) ?? undefined,
     });
 
     // 3) Prova browser→browser: somente quando existe uma janela da Governança.
