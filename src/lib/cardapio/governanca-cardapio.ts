@@ -2,7 +2,7 @@
 
 import {
   CONTRATO_GOVERNANCA,
-  VERSAO_CONTRATO_GOVERNANCA,
+  VERSAO_CONTRATO_GOVERNANANCA,
   dataLocalIso,
   unidadeHouse,
 } from './governanca-outbox';
@@ -11,7 +11,7 @@ const PREFIXO_CARDAPIO = 'tata.governanca.cardapio.v1.';
 
 export interface CardapioGovernancaDiaV1 {
   contrato: typeof CONTRATO_GOVERNANCA;
-  versao: typeof VERSAO_CONTRATO_GOVERNANCA;
+  versao: typeof VERSAO_CONTRATO_GOVERNANANCA;
   tipo: 'cardapio.dia';
   origem: 'governanca';
   atualizadoEm: string;
@@ -45,7 +45,17 @@ function texto(v: unknown): string {
 }
 
 function dataValida(v: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const ano = Number(m[1]);
+  const mes = Number(m[2]);
+  const dia = Number(m[3]);
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+function dataHoraValida(v: string): boolean {
+  return Boolean(v && !Number.isNaN(Date.parse(v)));
 }
 
 function chave(data: string, unidade: string): string {
@@ -57,34 +67,64 @@ function snapshotValido(v: unknown): v is CardapioGovernancaDiaV1 {
   const s = v as Partial<CardapioGovernancaDiaV1>;
   return Boolean(
     s.contrato === CONTRATO_GOVERNANCA &&
-      s.versao === VERSAO_CONTRATO_GOVERNANCA &&
+      s.versao === VERSAO_CONTRATO_GOVERNANANCA &&
       s.tipo === 'cardapio.dia' &&
       s.origem === 'governanca' &&
-      texto(s.atualizadoEm) &&
+      dataHoraValida(texto(s.atualizadoEm)) &&
       dataValida(texto(s.data)) &&
       texto(s.unidade) &&
-      texto(s.principal),
+      texto(s.principal) &&
+      typeof s.guarnicao === 'string' &&
+      typeof s.salada === 'string',
   );
 }
 
 /**
- * Aceita um snapshot já obtido por um canal autorizado e o persiste localmente.
- * Não busca rede e não sabe de onde o transporte veio.
+ * Persiste um snapshot de fronteira somente depois de validar o contrato v1.
+ * Campos extras são descartados para que o estado local permaneça canônico.
+ */
+export function salvarSnapshotCardapioGovernancaLocal(
+  entrada: unknown,
+): CardapioGovernancaDiaV1 | null {
+  const storage = storageDisponivel();
+  if (!storage || !snapshotValido(entrada)) return null;
+
+  const snapshot: CardapioGovernancaDiaV1 = {
+    contrato: CONTRATO_GOVERNANCA,
+    versao: VERSAO_CONTRATO_GOVERNANANCA,
+    tipo: 'cardapio.dia',
+    origem: 'governanca',
+    atualizadoEm: texto(entrada.atualizadoEm),
+    data: texto(entrada.data),
+    unidade: texto(entrada.unidade),
+    principal: texto(entrada.principal),
+    guarnicao: entrada.guarnicao.trim(),
+    salada: entrada.salada.trim(),
+  };
+
+  try {
+    storage.setItem(chave(snapshot.data, snapshot.unidade), JSON.stringify(snapshot));
+    return { ...snapshot };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Aceita os campos operacionais e constrói um snapshot canônico antes de
+ * persistir. Não busca rede e não conhece o transporte que trouxe os dados.
  */
 export function salvarCardapioGovernancaLocal(
   entrada: EntradaCardapioGovernanca,
 ): CardapioGovernancaDiaV1 | null {
-  const storage = storageDisponivel();
-  if (!storage) return null;
-
   const data = entrada.data.trim();
   const unidade = entrada.unidade?.trim() || unidadeHouse();
   const principal = entrada.principal.trim();
   if (!dataValida(data) || !unidade || !principal) return null;
 
-  const snapshot: CardapioGovernancaDiaV1 = {
+  return salvarSnapshotCardapioGovernancaLocal({
     contrato: CONTRATO_GOVERNANCA,
-    versao: VERSAO_CONTRATO_GOVERNANCA,
+    versao: VERSAO_CONTRATO_GOVERNANANCA,
     tipo: 'cardapio.dia',
     origem: 'governanca',
     atualizadoEm: entrada.atualizadoEm?.trim() || new Date().toISOString(),
@@ -93,14 +133,7 @@ export function salvarCardapioGovernancaLocal(
     principal,
     guarnicao: entrada.guarnicao?.trim() || '',
     salada: entrada.salada?.trim() || '',
-  };
-
-  try {
-    storage.setItem(chave(data, unidade), JSON.stringify(snapshot));
-    return snapshot;
-  } catch {
-    return null;
-  }
+  });
 }
 
 /**
@@ -118,7 +151,19 @@ export function lerCardapioGovernancaLocal(
     const raw = storage.getItem(chave(dataLocalIso(data), unidade));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
-    return snapshotValido(parsed) ? { ...parsed } : null;
+    if (!snapshotValido(parsed)) return null;
+    return {
+      contrato: CONTRATO_GOVERNANCA,
+      versao: VERSAO_CONTRATO_GOVERNANANCA,
+      tipo: 'cardapio.dia',
+      origem: 'governanca',
+      atualizadoEm: texto(parsed.atualizadoEm),
+      data: texto(parsed.data),
+      unidade: texto(parsed.unidade),
+      principal: texto(parsed.principal),
+      guarnicao: parsed.guarnicao.trim(),
+      salada: parsed.salada.trim(),
+    };
   } catch {
     return null;
   }
