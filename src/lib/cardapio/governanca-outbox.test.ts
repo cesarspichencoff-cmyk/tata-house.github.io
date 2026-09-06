@@ -139,6 +139,16 @@ describe('governanca-outbox', () => {
           voto: 'bom',
         },
         {
+          id: 'timestamp-incompleto',
+          tipo: 'avaliacao.prato',
+          origem: 'tata-house',
+          criadoEm: '2026-09-05',
+          data: '2026-09-05',
+          unidade: 'tata-house',
+          prato: 'Sopa',
+          voto: 'bom',
+        },
+        {
           id: 'data-impossivel',
           tipo: 'avaliacao.prato',
           origem: 'tata-house',
