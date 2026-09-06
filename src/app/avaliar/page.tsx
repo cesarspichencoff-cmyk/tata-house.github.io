@@ -16,22 +16,19 @@ import {
   registrarVotoCliente,
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
-import {
-  enviarAvaliacaoGovernanca,
-  lerCardapioGovernanca,
-} from '@/lib/cardapio/governanca-bridge';
+import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
 
 type Voto = 'bom' | 'ok' | 'ruim';
 
 const OPCOES: { v: Voto; emoji: string; rotulo: string }[] = [
   { v: 'bom', emoji: '😋', rotulo: 'Ótimo' },
-  { v: 'ok',  emoji: '😐', rotulo: 'Regular' },
+  { v: 'ok', emoji: '😐', rotulo: 'Regular' },
   { v: 'ruim', emoji: '👎', rotulo: 'Ruim' },
 ];
 
 const COR_VOTO: Record<Voto, string> = {
-  bom:  'bg-brand-500/20 ring-brand-500/50 text-brand-700 dark:text-brand-200',
-  ok:   'bg-ouro-400/20 ring-ouro-400/50 text-ouro-700 dark:text-ouro-200',
+  bom: 'bg-brand-500/20 ring-brand-500/50 text-brand-700 dark:text-brand-200',
+  ok: 'bg-ouro-400/20 ring-ouro-400/50 text-ouro-700 dark:text-ouro-200',
   ruim: 'bg-[#c96a5f]/20 ring-[#c96a5f]/40 text-perigo dark:text-perigo-claro',
 };
 
@@ -99,35 +96,15 @@ export default function PaginaAvaliar() {
   const [comentario, setComentario] = useState('');
 
   useEffect(() => {
-    let ativo = true;
-
     const atualizar = () => {
-      // Fallback imediato: preserva o comportamento offline existente.
+      // O House permanece fonte funcional enquanto nenhum transporte de
+      // Governança estiver oficialmente promovido. Zero dependência de rede.
       setCardapio(lerCardapioDoDia(semanaId, diaIdx));
       setPronto(true);
-
-      // Quando a ponte está configurada, o cardápio operacional da Governança
-      // prevalece para o QR. Falha remota não apaga o dado local.
-      void lerCardapioGovernanca(new Date())
-        .then((remoto) => {
-          if (!ativo || !remoto) return;
-          setCardapio({
-            principal: remoto.principal,
-            guarnicao: remoto.guarnicao,
-            salada: remoto.salada,
-          });
-        })
-        .catch(() => {
-          // Sem ruído para quem está avaliando: o fallback local já foi exibido.
-        });
     };
 
     atualizar();
-    const cancelar = assinarChaveExterna('semana.' + semanaId, atualizar);
-    return () => {
-      ativo = false;
-      cancelar();
-    };
+    return assinarChaveExterna('semana.' + semanaId, atualizar);
   }, [semanaId, diaIdx]);
 
   const prato = cardapio?.principal;
@@ -142,23 +119,25 @@ export default function PaginaAvaliar() {
 
   const enviar = () => {
     if (!prato || !qualidade) return;
-    try { navigator.vibrate?.(15); } catch { /* sem suporte */ }
+    try {
+      navigator.vibrate?.(15);
+    } catch {
+      /* sem suporte */
+    }
 
     const voto = qualidade;
     const textoComentario = comentario;
 
-    // 1) House primeiro: mantém aceitação + termômetro + memória mesmo offline.
+    // 1) House primeiro: aceitação + termômetro + memória continuam intactos.
     registrarVotoCliente(prato, voto, textoComentario);
 
-    // 2) Governança depois: espelha no tata_plus sem bloquear a experiência.
-    void enviarAvaliacaoGovernanca({
+    // 2) Contrato da Governança: persistência LOCAL, sem HTTP/Supabase.
+    // Um transporte futuro confirma IDs individualmente e só então limpa a fila.
+    registrarAvaliacaoGovernancaPendente({
       data: new Date(),
       prato,
       voto,
       comentario: textoComentario,
-    }).catch(() => {
-      // O voto já está preservado no House. A sincronização remota é best effort
-      // nesta Fase 1; fila persistente entra somente após provar o contrato vivo.
     });
 
     setEnviado(true);
