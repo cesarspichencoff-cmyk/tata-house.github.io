@@ -17,16 +17,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feat/house-governanca-phase1
-      - uses: actions/checkout@v4
-        with:
-          repository: cesarspichencoff-cmyk/lideres
-          ref: feat/tatahouse-governanca-phase1
-          path: leaders
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Build current House feature
         run: npm ci && npm run build
+      - uses: actions/checkout@v4
+        with:
+          repository: cesarspichencoff-cmyk/lideres
+          ref: feat/tatahouse-governanca-phase1
+          path: leaders
       - name: Install Playwright Chromium
         run: |
           mkdir -p /tmp/tatahouse-cenarios-e2e
@@ -115,7 +115,7 @@ jobs:
             if(!(await eq.getByText(/motor multi-critério priorizou aceitação e diversidade/i).isVisible()))throw new Error('explainability absent');
             console.log('CENARIOS_E2E_EVIDENCE_EXPLAINABILITY=PASS');
             fs.mkdirSync('/tmp/tatahouse-cenarios-shots',{recursive:true});
-            await frame.page().screenshot({path:'/tmp/tatahouse-cenarios-shots/01-comparacao-desktop.png',fullPage:true});
+            await page.screenshot({path:'/tmp/tatahouse-cenarios-shots/01-comparacao-desktop.png',fullPage:true});
 
             let escolhido=null;
             for(let i=0;i<await cards.count();i++){
@@ -125,11 +125,9 @@ jobs:
             if(!escolhido)throw new Error('all generated scenarios have blocking errors');
             const testid=await escolhido.getAttribute('data-testid');
             const id=testid.replace('cenario-','');
-            frame.once('dialog',d=>d.accept());
+            page.once('dialog',d=>d.accept());
             await frame.getByTestId('aplicar-'+id).click();
-            await frame.getByTestId('mensagem-cenarios').getByText(/Cenário aplicado somente ao rascunho local/i).waitFor({state:'visible',timeout:10000}).catch(async()=>{
-              const txt=await frame.getByTestId('mensagem-cenarios').innerText(); if(!/Cenário aplicado somente ao rascunho local/i.test(txt))throw new Error('apply confirmation missing: '+txt);
-            });
+            await frame.waitForFunction(()=>/Cenário aplicado somente ao rascunho local/i.test(document.querySelector('[data-testid="mensagem-cenarios"]')?.textContent||''),null,{timeout:10000});
             const state=await frame.evaluate(()=>JSON.parse(localStorage.getItem('cardapio.v1.semana.2026-S37')||'null'));
             if(!state||state.dias.length!==7||state.dias.some(d=>!d.principal))throw new Error('applied draft invalid');
             if(Object.keys(state.ajustes||{}).length||Object.keys(state.manuais||{}).length||Object.keys(state.status||{}).length||state.refeicoes||state.notas||state.notasFiscais)throw new Error('derived operational state was not cleared');
