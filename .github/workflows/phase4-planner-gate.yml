@@ -14,20 +14,20 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Test
+      - run: npm test
+      - name: Typecheck
         run: |
           set +e
-          npm test > phase4-test.log 2>&1
+          npm run typecheck > phase4-typecheck.log 2>&1
           code=$?
-          cat phase4-test.log
+          cat phase4-typecheck.log
           exit $code
-      - name: Upload test diagnostics
+      - name: Upload typecheck diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase4-test-diagnostics
-          path: phase4-test.log
-      - run: npm run typecheck
+          name: phase4-typecheck-diagnostics
+          path: phase4-typecheck.log
       - run: npm run lint
       - run: npm run build
       - name: Assert planner export
