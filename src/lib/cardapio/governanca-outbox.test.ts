@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTRATO_GOVERNANCA,
+  LIMITE_PENDENCIAS_GOVERNANCA,
   VERSAO_CONTRATO_GOVERNANCA,
   confirmarEventosGovernanca,
   criarPacoteGovernanca,
@@ -140,6 +141,31 @@ describe('governanca-outbox', () => {
     });
     expect(evento).toBeNull();
     expect(listarPendenciasGovernanca()).toEqual([]);
+  });
+
+  it('falha fechada no limite sem descartar pendências antigas', () => {
+    const existentes = Array.from({ length: LIMITE_PENDENCIAS_GOVERNANCA }, (_, i) => ({
+      id: `pendente-${i}`,
+      tipo: 'avaliacao.prato',
+      origem: 'tata-house',
+      criadoEm: '2026-09-05T15:00:00.000Z',
+      data: '2026-09-05',
+      unidade: 'tata-house',
+      prato: `Prato ${i}`,
+      voto: 'bom',
+    }));
+    window.localStorage.setItem('tata.governanca.outbox.v1', JSON.stringify(existentes));
+
+    const novo = registrarAvaliacaoGovernancaPendente({
+      data: new Date(2026, 8, 5),
+      prato: 'Prato novo',
+      voto: 'ruim',
+    });
+
+    expect(novo).toBeNull();
+    expect(listarPendenciasGovernanca()).toHaveLength(LIMITE_PENDENCIAS_GOVERNANCA);
+    expect(listarPendenciasGovernanca()[0]?.id).toBe('pendente-0');
+    expect(listarPendenciasGovernanca().at(-1)?.id).toBe(`pendente-${LIMITE_PENDENCIAS_GOVERNANCA - 1}`);
   });
 
   it('filtra registros locais que violam o contrato v1', () => {
