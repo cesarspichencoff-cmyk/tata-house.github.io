@@ -51,8 +51,8 @@ function fornecedoresEfetivos(): Record<string, string> {
 
 function secoesPermitidas(secoes?: readonly string[]): SecaoHouseGovernanca[] {
   const permitidas = new Set<string>(SECOES_HOUSE_GOVERNANCA);
-  if (!secoes?.length) return [...SECOES_HOUSE_GOVERNANCA];
-  return [...new Set(secoes.filter((secao): secao is SecaoHouseGovernanca => permitidas.has(secao)))];
+  if (!secoes?.length) return Array.from(SECOES_HOUSE_GOVERNANCA);
+  return Array.from(new Set(secoes.filter((secao): secao is SecaoHouseGovernanca => permitidas.has(secao))));
 }
 
 export function semanaGovernancaValida(semanaId: string): boolean {
