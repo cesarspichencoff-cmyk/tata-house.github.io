@@ -98,6 +98,10 @@ export function lerPontosRefeicaoDia(data: string): RegistroPontosRefeicaoDiaV1 
 /**
  * Salva somente a distribuição explícita. O total tradicional permanece em
  * contagemRefeicoes; esta camada nunca o recalcula nem o sobrescreve.
+ *
+ * Não existe remoção local isolada neste contrato: o BootNuvem intercepta
+ * setItem para sincronizar com Supabase, mas não removeItem. Assim evitamos uma
+ * falsa exclusão local que poderia ser ressuscitada pela cópia remota.
  */
 export function salvarPontosRefeicaoDia(
   data: string,
@@ -120,18 +124,6 @@ export function salvarPontosRefeicaoDia(
     return registro;
   } catch {
     return null;
-  }
-}
-
-export function removerPontosRefeicaoDia(data: string): boolean {
-  if (!dataValida(data)) return false;
-  const storage = storageDisponivel();
-  if (!storage) return false;
-  try {
-    storage.removeItem(PREFIXO + data);
-    return true;
-  } catch {
-    return false;
   }
 }
 
