@@ -1,0 +1,77 @@
+name: TATA House governance UI patch temporary gate
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+    paths:
+      - '.github/workflows/tatahouse-governanca-ui-patch-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Patch AbaContagem minimally
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/cardapio/AbaContagem.tsx')
+          s = p.read_text()
+
+          old_import = "import type { ContagemRefeicoesDia, EstadoSemana, Papel } from '@/lib/cardapio/tipos';\n"
+          new_import = old_import + "import { DistribuicaoMesasRefeicao } from '@/components/cardapio/DistribuicaoMesasRefeicao';\n"
+          if s.count(old_import) != 1:
+              raise SystemExit('import anchor not unique')
+          s = s.replace(old_import, new_import, 1)
+
+          old_button = """            <Botao
+              onClick={handleSalvar}
+              className=\"w-full\"
+              variante={salvo ? 'sucesso' : 'primario'}
+              disabled={almoco === '' && jantar === '' && marmitas === ''}
+            >
+              {salvo ? '✓ Salvo!' : `Salvar ${DIAS_SEMANA[diaAtivo]}`}
+            </Botao>
+"""
+          new_button = old_button + """            {regAtivo && (
+              <DistribuicaoMesasRefeicao
+                data={DATAS_SEMANA[diaAtivo]}
+                total={{
+                  almoco: regAtivo.almoco,
+                  jantar: regAtivo.jantar,
+                  marmitas: regAtivo.marmitas,
+                }}
+              />
+            )}
+"""
+          if s.count(old_button) != 1:
+              raise SystemExit('button anchor not unique')
+          s = s.replace(old_button, new_button, 1)
+          p.write_text(s)
+          PY
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: git diff --check
+      - name: Commit only after all gates pass
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tatahouse-governanca-ui-patch-temp.yml
+          git add src/components/cardapio/AbaContagem.tsx
+          git commit -m "feat(house): expose optional Itaim Pinheiros meal table split"
+          git push origin HEAD:feat/house-governanca-phase1
