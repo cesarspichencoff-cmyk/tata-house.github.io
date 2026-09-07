@@ -1,9 +1,13 @@
-import type {
-  DistribuicaoRefeicoesPorPonto,
-  PlanejamentoPorPonto,
-  PontoRefeicao,
-  QuantidadeRefeicoes,
-} from './tipos';
+export type PontoRefeicao = 'itaim' | 'pinheiros';
+
+export interface QuantidadeRefeicoes {
+  almoco: number;
+  jantar: number;
+  marmitas: number;
+}
+
+export type DistribuicaoRefeicoesPorPonto = Partial<Record<PontoRefeicao, QuantidadeRefeicoes>>;
+export type PlanejamentoPorPonto = Partial<Record<PontoRefeicao, number>>;
 
 export const PONTOS_REFEICAO: readonly PontoRefeicao[] = ['itaim', 'pinheiros'] as const;
 
