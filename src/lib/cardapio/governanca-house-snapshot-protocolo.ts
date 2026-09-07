@@ -43,7 +43,7 @@ export function normalizarRequisicaoHouseSnapshotV2(
     const permitidas = new Set<string>(SECOES_HOUSE_GOVERNANCA);
     const normalizadas = bruto.secoes.map(texto);
     if (normalizadas.some((secao) => !permitidas.has(secao))) return null;
-    secoes = [...new Set(normalizadas)] as SecaoHouseGovernanca[];
+    secoes = Array.from(new Set(normalizadas)) as SecaoHouseGovernanca[];
   }
 
   return {
