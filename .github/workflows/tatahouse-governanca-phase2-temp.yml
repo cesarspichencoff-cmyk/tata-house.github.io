@@ -1,0 +1,30 @@
+name: TATA House governance phase2 temporary gate
+
+on:
+  push:
+    branches: [feat/house-governanca-phase2]
+    paths:
+      - 'src/lib/cardapio/governanca-house-snapshot.ts'
+      - 'src/lib/cardapio/governanca-house-snapshot.test.ts'
+      - 'src/lib/cardapio/governanca-house-snapshot-runtime.ts'
+      - 'src/lib/cardapio/governanca-house-snapshot-protocolo.ts'
+      - 'src/lib/cardapio/governanca-house-snapshot-protocolo.test.ts'
+      - 'src/components/GovernancaSnapshotResponder.tsx'
+      - 'src/app/layout.tsx'
+      - '.github/workflows/tatahouse-governanca-phase2-temp.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: git diff --check
