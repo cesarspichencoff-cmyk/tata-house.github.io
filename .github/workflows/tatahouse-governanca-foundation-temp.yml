@@ -1,0 +1,33 @@
+name: TATA House governance foundation temporary gate
+
+on:
+  push:
+    branches: [feat/house-governanca-phase1]
+    paths:
+      - 'src/lib/cardapio/pontos-refeicao.ts'
+      - 'src/lib/cardapio/pontos-refeicao.test.ts'
+      - 'src/lib/cardapio/pontos-refeicao-storage.ts'
+      - 'src/lib/cardapio/governanca-house-readmodel.ts'
+      - 'src/lib/cardapio/governanca-house-readmodel.test.ts'
+      - '.github/workflows/tatahouse-governanca-foundation-temp.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/house-governanca-phase1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: git diff --check
