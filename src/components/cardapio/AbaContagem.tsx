@@ -7,6 +7,7 @@ import { calcularStats, calcularTendenciaMensal } from '@/lib/cardapio/refeicoes
 import { MEDIA_POR_DIA } from '@/lib/cardapio/media-diaria';
 import type { StatsRefeicoes, MesTendencia } from '@/lib/cardapio/refeicoes';
 import type { ContagemRefeicoesDia, EstadoSemana, Papel } from '@/lib/cardapio/tipos';
+import { DistribuicaoMesasRefeicao } from '@/components/cardapio/DistribuicaoMesasRefeicao';
 
 const DIAS_ABREV = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
@@ -330,6 +331,16 @@ export function AbaContagem({
             >
               {salvo ? '✓ Salvo!' : `Salvar ${DIAS_SEMANA[diaAtivo]}`}
             </Botao>
+            {regAtivo && (
+              <DistribuicaoMesasRefeicao
+                data={DATAS_SEMANA[diaAtivo]}
+                total={{
+                  almoco: regAtivo.almoco,
+                  jantar: regAtivo.jantar,
+                  marmitas: regAtivo.marmitas,
+                }}
+              />
+            )}
           </div>
         )}
 
