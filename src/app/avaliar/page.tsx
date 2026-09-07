@@ -16,18 +16,24 @@ import {
   registrarVotoCliente,
   type CardapioDoDia,
 } from '@/lib/cardapio/avaliar-cliente';
+import { lerCardapioGovernancaLocal } from '@/lib/cardapio/governanca-cardapio';
+import { unidadeFonteGovernancaLocal } from '@/lib/cardapio/governanca-unidade-fonte';
+import { instalarHandoffCardapioGovernanca } from '@/lib/cardapio/governanca-handoff';
+import { registrarAvaliacaoGovernancaPendente } from '@/lib/cardapio/governanca-outbox';
+import { criarTransportePostMessageGovernanca } from '@/lib/cardapio/governanca-postmessage';
+import { sincronizarPendenciasGovernanca } from '@/lib/cardapio/governanca-sync';
 
 type Voto = 'bom' | 'ok' | 'ruim';
 
 const OPCOES: { v: Voto; emoji: string; rotulo: string }[] = [
   { v: 'bom', emoji: '😋', rotulo: 'Ótimo' },
-  { v: 'ok',  emoji: '😐', rotulo: 'Regular' },
+  { v: 'ok', emoji: '😐', rotulo: 'Regular' },
   { v: 'ruim', emoji: '👎', rotulo: 'Ruim' },
 ];
 
 const COR_VOTO: Record<Voto, string> = {
-  bom:  'bg-brand-500/20 ring-brand-500/50 text-brand-700 dark:text-brand-200',
-  ok:   'bg-ouro-400/20 ring-ouro-400/50 text-ouro-700 dark:text-ouro-200',
+  bom: 'bg-brand-500/20 ring-brand-500/50 text-brand-700 dark:text-brand-200',
+  ok: 'bg-ouro-400/20 ring-ouro-400/50 text-ouro-700 dark:text-ouro-200',
   ruim: 'bg-[#c96a5f]/20 ring-[#c96a5f]/40 text-perigo dark:text-perigo-claro',
 };
 
@@ -95,11 +101,38 @@ export default function PaginaAvaliar() {
   const [comentario, setComentario] = useState('');
 
   useEffect(() => {
-    const ler = () => setCardapio(lerCardapioDoDia(semanaId, diaIdx));
-    ler();
-    setPronto(true);
-    // mostra o cardápio assim que o BootNuvem o traz da nuvem (celular novo)
-    return assinarChaveExterna('semana.' + semanaId, ler);
+    const atualizar = () => {
+      // Se um canal autorizado já entregou o snapshot da Governança, ele ganha
+      // precedência. Sem snapshot, o House continua exatamente como antes.
+      // Não há rede, endpoint ou dependência de Supabase nesta decisão.
+      const governanca = lerCardapioGovernancaLocal(new Date());
+      setCardapio(
+        governanca
+          ? {
+              principal: governanca.principal,
+              guarnicao: governanca.guarnicao,
+              salada: governanca.salada,
+            }
+          : lerCardapioDoDia(semanaId, diaIdx),
+      );
+      setPronto(true);
+    };
+
+    atualizar();
+    const pararChaveExterna = assinarChaveExterna('semana.' + semanaId, atualizar);
+    const pararHandoff = instalarHandoffCardapioGovernanca(() => atualizar());
+
+    // Se esta tela foi aberta pela Governança, aproveita o canal autorizado para
+    // tentar escoar pendências antigas. Sem opener/parent, o transporte confirma
+    // zero IDs e a outbox permanece intacta.
+    void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
+      // A sincronização é secundária; nunca bloqueia o QR nem apaga pendências.
+    });
+
+    return () => {
+      pararChaveExterna();
+      pararHandoff();
+    };
   }, [semanaId, diaIdx]);
 
   const prato = cardapio?.principal;
@@ -114,10 +147,35 @@ export default function PaginaAvaliar() {
 
   const enviar = () => {
     if (!prato || !qualidade) return;
-    try { navigator.vibrate?.(15); } catch { /* sem suporte */ }
+    try {
+      navigator.vibrate?.(15);
+    } catch {
+      /* sem suporte */
+    }
 
-    // alimenta aceitação + termômetro + pesquisa de satisfação de uma vez
-    registrarVotoCliente(prato, qualidade, comentario);
+    const voto = qualidade;
+    const textoComentario = comentario;
+
+    // 1) House primeiro: aceitação + termômetro + memória continuam intactos.
+    registrarVotoCliente(prato, voto, textoComentario);
+
+    // 2) Contrato da Governança: persistência LOCAL, sem HTTP/Supabase.
+    // Um transporte confirma IDs individualmente e só então limpa a fila.
+    const pendente = registrarAvaliacaoGovernancaPendente({
+      data: new Date(),
+      prato,
+      voto,
+      comentario: textoComentario,
+      unidade: unidadeFonteGovernancaLocal(new Date()) ?? undefined,
+    });
+
+    // 3) Prova browser→browser: somente quando existe uma janela da Governança.
+    // Ausência/falha do canal não muda a experiência nem perde o voto local.
+    if (pendente) {
+      void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
+        // A outbox continua sendo a fonte da pendência até um ACK válido chegar.
+      });
+    }
 
     setEnviado(true);
     setQualidade(null);
