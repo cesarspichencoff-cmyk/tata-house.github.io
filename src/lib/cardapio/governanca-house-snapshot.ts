@@ -107,7 +107,7 @@ function arredondar(valor: number, casas = 3): number {
 function secoesValidas(secoes?: readonly SecaoHouseGovernanca[]): SecaoHouseGovernanca[] {
   const pedidas = secoes?.length ? secoes : SECOES_HOUSE_GOVERNANCA;
   const permitidas = new Set<string>(SECOES_HOUSE_GOVERNANCA);
-  return [...new Set(pedidas.filter((secao) => permitidas.has(secao)))];
+  return Array.from(new Set(pedidas.filter((secao) => permitidas.has(secao))));
 }
 
 function construirDesperdicio(
