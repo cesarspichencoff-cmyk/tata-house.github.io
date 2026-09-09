@@ -96,6 +96,13 @@ function lerLocal<T>(chave: string, padrao: T): T {
   }
 }
 
+function agendarNotificacaoLocal(chave: string) {
+  if (typeof window === 'undefined') return;
+  const emitir = () => window.dispatchEvent(new CustomEvent('tata:chave-externa', { detail: { chave } }));
+  if (typeof queueMicrotask === 'function') queueMicrotask(emitir);
+  else window.setTimeout(emitir, 0);
+}
+
 function gravarLocal(chave: string, valor: unknown) {
   try {
     const resultado = gravarComRecuperacaoDeQuota(
@@ -104,6 +111,10 @@ function gravarLocal(chave: string, valor: unknown) {
       JSON.stringify(valor),
     );
     definirArmazenamentoLocalCheio(!resultado.ok);
+    // O evento nativo `storage` não dispara na mesma aba. Agenda a
+    // notificação depois do updater atual para que outros hooks locais
+    // releiam a mesma fonte persistida sem updates React aninhados.
+    if (resultado.ok) agendarNotificacaoLocal(chave);
   } catch {
     // Falha fora do fluxo normal de quota: mantém o aviso e nunca finge que salvou.
     definirArmazenamentoLocalCheio(true);
@@ -787,28 +798,59 @@ export function montarDnaAlimentar(): DnaAlimentar {
   // Base histórica: frequência real de cada prato nos anos de operação (dados.json)
   const freqBase = freqBaseDosDados();
 
-  // Média de pessoas/dia calculada das semanas registradas no app
-  let somaPessoas = 0;
-  let nDiasPessoas = 0;
-  semanas.forEach(({ estado }) => {
-    estado.dias.forEach((d) => {
-      if (d.principal && d.pessoas > 0) { somaPessoas += d.pessoas; nDiasPessoas++; }
+  // Pessoas/dia: contagem real prevalece quando existe. O planejado fica
+  // como fallback histórico para instalações que ainda não começaram a contar.
+  const contagensReais = lerLocal<ContagemRefeicoesDia[]>('contagemRefeicoes', []);
+  const totaisReais = contagensReais
+    .map((c) => Math.max(0, c.almoco) + Math.max(0, c.jantar) + Math.max(0, c.marmitas))
+    .filter((total) => total > 0);
+
+  let mediaPessoas: number | null = null;
+  if (totaisReais.length > 0) {
+    mediaPessoas = Math.round(totaisReais.reduce((s, n) => s + n, 0) / totaisReais.length);
+  } else {
+    let somaPessoas = 0;
+    let nDiasPessoas = 0;
+    semanas.forEach(({ estado }) => {
+      estado.dias.forEach((d) => {
+        if (d.principal && d.pessoas > 0) { somaPessoas += d.pessoas; nDiasPessoas++; }
+      });
     });
-  });
-  const mediaPessoas = nDiasPessoas > 0 ? Math.round(somaPessoas / nDiasPessoas) : null;
+    mediaPessoas = nDiasPessoas > 0 ? Math.round(somaPessoas / nDiasPessoas) : null;
+  }
 
   return calcularDna(semanas, aceitacao, desperdicio, freqBase, TOTAL_DIAS_HISTORICO, mediaPessoas);
 }
 
-/** Hook do DNA alimentar — recalcula no cliente quando monta. */
+/** Hook do DNA alimentar — recalcula quando qualquer evidência que o forma muda. */
 export function useDna() {
   const [dna, setDna] = useState<DnaAlimentar | null>(null);
 
   const recalcular = useCallback(() => setDna(montarDnaAlimentar()), []);
 
   useEffect(() => { recalcular(); }, [recalcular]);
-  // votos do QR e mudanças de aceitação chegam por fora — recalcula o DNA
-  useReleituraExterna('aceitacao', recalcular);
+  useEffect(() => {
+    const relevante = (chave: string) =>
+      chave === 'aceitacao' ||
+      chave === 'contagemRefeicoes' ||
+      chave === 'mediaRefeicoes' ||
+      chave.startsWith('semana.') ||
+      chave.startsWith('desperdicio.');
+    const onExterno = (e: Event) => {
+      const chave = (e as CustomEvent<{ chave?: string }>).detail?.chave ?? '';
+      if (relevante(chave)) recalcular();
+    };
+    const onStorage = (e: StorageEvent) => {
+      const chave = e.key?.startsWith(PREFIXO) ? e.key.slice(PREFIXO.length) : '';
+      if (relevante(chave)) recalcular();
+    };
+    window.addEventListener(EVENTO_CHAVE, onExterno);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(EVENTO_CHAVE, onExterno);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [recalcular]);
 
   return { dna, recalcular };
 }

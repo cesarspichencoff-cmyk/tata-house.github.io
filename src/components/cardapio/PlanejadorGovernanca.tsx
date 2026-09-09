@@ -23,7 +23,7 @@ import {
   useSemana,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
-import { normalizar } from '@/lib/cardapio/motor';
+import { listaDoDia, normalizar } from '@/lib/cardapio/motor';
 import {
   avaliarProntidaoPlanejamento,
   construirDraftPlanejamentoGovernanca,
@@ -43,6 +43,12 @@ import {
   solicitarRestricoesGovernanca,
   type SnapshotRestricoesGovernancaV1,
 } from '@/lib/cardapio/governanca-restricoes';
+import {
+  estoqueOficialParaPlanejamento,
+  instalarHandoffEstoqueGovernanca,
+  solicitarEstoqueGovernanca,
+  type SnapshotEstoqueGovernancaV1,
+} from '@/lib/cardapio/governanca-estoque-oficial';
 
 function novoId(prefixo: string): string {
   try {
@@ -140,6 +146,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [mensagemEnvio, setMensagemEnvio] = useState('');
   const [evidenciaReadOnly, setEvidenciaReadOnly] = useState<EvidenciaGovernancaReadOnlyV1 | null>(null);
   const [restricoesOficiais, setRestricoesOficiais] = useState<SnapshotRestricoesGovernancaV1 | null>(null);
+  const [estoqueOficial, setEstoqueOficial] = useState<SnapshotEstoqueGovernancaV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
   const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
@@ -175,9 +182,23 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     return cont;
   }, [contexto.semanaId, evidenciaReadOnly]);
 
-  const estoqueQuantidade = useMemo(() => Object.fromEntries(
+  const estoqueLocalQuantidade = useMemo(() => Object.fromEntries(
     Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
   ), [estoque]);
+  const itensEstoqueOficial = useMemo(() => {
+    const vistos = new Map<string, string>();
+    estado.dias.forEach((dia) => {
+      listaDoDia(dia, fatores).forEach((item) => {
+        const chave = normalizar(item.item);
+        if (chave && !vistos.has(chave)) vistos.set(chave, item.item);
+      });
+    });
+    return Array.from(vistos.values());
+  }, [estado.dias, fatores]);
+  const estoqueQuantidade = useMemo(() => ({
+    ...estoqueLocalQuantidade,
+    ...estoqueOficialParaPlanejamento(estoqueOficial, contexto.unidadeFonte),
+  }), [estoqueLocalQuantidade, estoqueOficial, contexto.unidadeFonte]);
 
   const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
   const baselineAutomatico = useMemo(() => semanaVazia().dias.map((d) => d.pessoas), []);
@@ -201,6 +222,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     aoSnapshot: setRestricoesOficiais,
   }), [contexto.semanaId, contexto.unidadeFonte]);
 
+  useEffect(() => instalarHandoffEstoqueGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setEstoqueOficial,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+
   useEffect(() => {
     const itens = itensDaSemanaParaRestricoes(estado.dias);
     if (!itens.length) { setRestricoesOficiais(null); return; }
@@ -209,6 +236,18 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     }, 120);
     return () => window.clearTimeout(timer);
   }, [contexto.semanaId, contexto.unidadeFonte, estado.dias]);
+
+  useEffect(() => {
+    if (!itensEstoqueOficial.length) { setEstoqueOficial(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarEstoqueGovernanca({
+        unidade: contexto.unidadeFonte,
+        semanaId: contexto.semanaId,
+        itens: itensEstoqueOficial,
+      });
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, itensEstoqueOficial]);
 
   useEffect(() => instalarHandoffPlanejadorGovernanca({
     aoContexto: () => {},
@@ -268,6 +307,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
         {evidenciaReadOnly && (
           <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
             <strong>Histórico oficial carregado:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Usado somente para analisar esta semana.
+          </section>
+        )}
+
+        {estoqueOficial && (
+          <section data-testid="estoque-oficial-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
+            <strong>Estoque oficial carregado:</strong> {estoqueOficial.itens.length} item(ns) unívoco(s) · {estoqueOficial.ambiguos.length} ambíguo(s) · {estoqueOficial.semContagem.length} sem contagem. Somente contagens recentes entram no bônus leve do planejamento; itens ambíguos ficam fora.
           </section>
         )}
 
