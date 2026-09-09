@@ -309,6 +309,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               estoque={estoqueQuantidade}
               restricoesEquipe={restricoesEquipe}
               desperdicioHistorico={desperdicioHistorico}
+              historicoPrecos={historico}
               baselineAutomatico={baselineAutomatico}
               eventos={eventos}
               datasSemana={datasSemana}

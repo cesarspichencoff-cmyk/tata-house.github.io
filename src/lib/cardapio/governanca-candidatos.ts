@@ -1,5 +1,6 @@
 import { custoDaSemana } from './custo-semana';
 import {
+  listaDoDia,
   normalizar,
   notaNutricaoPrato,
   PESSOAS_PADRAO,
@@ -16,7 +17,8 @@ import {
   resumoOperacionalOficial,
 } from './governanca-readonly';
 import { impactoRestricoesLocais } from './governanca-restricoes';
-import type { DiaCardapio, EstadoSemana, EventoDemanda, RegistroDesperdicio } from './tipos';
+import { analisarRadar } from './radar';
+import type { DiaCardapio, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
 export type AceitacaoPlanejamento = Record<string, { n: number; somaNotas: number }>;
@@ -37,6 +39,8 @@ export interface MetricasCenarioGovernanca {
   desperdicioMedioPct: number | null;
   pratosComDesperdicio: number;
   amostraDesperdicio: number;
+  itensPrecoAlta: number;
+  maiorAltaPrecoPct: number | null;
   nutricaoMedia: number;
   proteinasDistintas: number;
   erros: number;
@@ -68,6 +72,7 @@ export interface ContextoCenariosGovernanca {
   estoque?: Record<string, number>;
   restricoesEquipe?: Record<string, number>;
   desperdicioHistorico?: RegistroDesperdicio[];
+  historicoPrecos?: HistoricoPrecos;
   /** Pessoas geradas automaticamente pelo próprio House antes de qualquer ajuste humano. */
   baselineAutomatico?: number[];
   /** Eventos manuais já existentes no House; fator segue a semântica do módulo de previsão. */
@@ -159,6 +164,7 @@ export function analisarCenarioGovernanca(args: {
   frequencia: Record<string, number>;
   restricoesEquipe?: Record<string, number>;
   desperdicioHistorico?: RegistroDesperdicio[];
+  historicoPrecos?: HistoricoPrecos;
 }): MetricasCenarioGovernanca {
   const estadoCandidato = aplicarCenarioAoEstado(args.estadoBase, args.dias);
   const custo = custoDaSemana(
@@ -220,6 +226,26 @@ export function analisarCenarioGovernanca(args: {
     ? Math.round((somaTaxasDesperdicio / amostraDesperdicio) * 100)
     : null;
 
+  // O custo já usa o preço atual. O radar entra somente como risco visível,
+  // sem uma segunda penalização no score do cenário. Reutiliza o limiar oficial
+  // do módulo radar (alta anormal >=15% desde a última cotação).
+  const altas = new Map(
+    analisarRadar(args.precos, args.historicoPrecos ?? {})
+      .filter((r) => r.alerta === 'alta' && r.variacao !== null)
+      .map((r) => [r.norm, r]),
+  );
+  const altasUsadas = new Map<string, number>();
+  args.dias.forEach((dia) => {
+    listaDoDia(dia, args.fatores, { mostrarBasicos: args.mostrarBasicos }).forEach((item) => {
+      const chave = normalizar(item.item);
+      const alta = altas.get(chave);
+      if (alta?.variacao !== null && alta?.variacao !== undefined) altasUsadas.set(chave, alta.variacao);
+    });
+  });
+  const maiorAltaPrecoPct = altasUsadas.size
+    ? Math.round(Math.max(...Array.from(altasUsadas.values())) * 100)
+    : null;
+
   return {
     custoTotal: custo.total,
     custoPorRefeicao: custo.porRefeicao,
@@ -236,6 +262,8 @@ export function analisarCenarioGovernanca(args: {
     desperdicioMedioPct,
     pratosComDesperdicio,
     amostraDesperdicio,
+    itensPrecoAlta: altasUsadas.size,
+    maiorAltaPrecoPct,
     nutricaoMedia: Math.round(nutricaoMedia),
     proteinasDistintas: proteinas.size,
     erros: avisos.filter((a) => a.nivel === 'erro').length,
@@ -264,6 +292,8 @@ function construirPorques(
   else itens.push('Nenhum conflito foi encontrado nas restrições cadastradas no módulo de funcionários do House.');
   if (m.desperdicioMedioPct !== null) itens.push(`Histórico House dos principais deste cenário: desperdício médio ${m.desperdicioMedioPct}% em ${m.amostraDesperdicio} registro(s), cobrindo ${m.pratosComDesperdicio}/7 prato(s). A taxa é normalizada dentro de cada registro; kg e porções nunca são somados.`);
   else itens.push('Ainda não há amostra de desperdício House para os principais deste cenário; o sistema não inventa penalidade.');
+  if (m.itensPrecoAlta > 0) itens.push(`${m.itensPrecoAlta} insumo(s) desta proposta estão em alta anormal no radar de preços${m.maiorAltaPrecoPct !== null ? `; maior alta ${m.maiorAltaPrecoPct}%` : ''}. O custo atual já incorpora o preço vigente; a tendência é mostrada como risco e não é penalizada duas vezes.`);
+  else itens.push('Nenhum insumo desta proposta com histórico suficiente está em alta anormal no radar atual.');
   if (m.itensSemPreco > 0) itens.push(`${m.itensSemPreco} item(ns) continuam sem preço; custo deve ser tratado como incompleto.`);
   else if (m.itensEstimados > 0) itens.push(`Custo usa ${m.itensEstimados} preço(s) estimado(s); a tela distingue estimativa de preço real.`);
   else if (m.custoPorRefeicao !== null) itens.push('O custo foi calculado pela fonte única oficial da semana, sem uma calculadora paralela.');
@@ -288,6 +318,7 @@ function montarCenario(
     frequencia: contexto.frequencia,
     restricoesEquipe: contexto.restricoesEquipe,
     desperdicioHistorico: contexto.desperdicioHistorico,
+    historicoPrecos: contexto.historicoPrecos,
   });
   return {
     id: modo,

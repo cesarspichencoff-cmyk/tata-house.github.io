@@ -7,7 +7,7 @@ import {
   gerarCenariosGovernanca,
   type CenarioGovernanca,
 } from '@/lib/cardapio/governanca-candidatos';
-import type { Aceitacao, EstadoSemana, EventoDemanda, RegistroDesperdicio } from '@/lib/cardapio/tipos';
+import type { Aceitacao, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -90,6 +90,11 @@ function CardCenario({
           hint={m.desperdicioMedioPct === null ? 'histórico House ainda insuficiente' : `${m.pratosComDesperdicio}/7 principais · ${m.amostraDesperdicio} registro(s)`}
         />
         <Metric
+          label="Preço em alta"
+          value={m.itensPrecoAlta > 0 ? `${m.itensPrecoAlta} insumo${m.itensPrecoAlta === 1 ? '' : 's'}` : 'Sem alerta'}
+          hint={m.itensPrecoAlta > 0 && m.maiorAltaPrecoPct !== null ? `maior alta ${m.maiorAltaPrecoPct}% · sinal sem dupla penalização` : 'radar House · limiar de alta anormal'}
+        />
+        <Metric
           label="Demanda"
           value={mDemand(cenario)}
           hint={hDemand(cenario)}
@@ -151,6 +156,7 @@ export function CenariosGovernanca({
   estoque,
   restricoesEquipe,
   desperdicioHistorico,
+  historicoPrecos,
   baselineAutomatico,
   eventos,
   datasSemana,
@@ -166,6 +172,7 @@ export function CenariosGovernanca({
   estoque: Record<string, number>;
   restricoesEquipe: Record<string, number>;
   desperdicioHistorico: RegistroDesperdicio[];
+  historicoPrecos: HistoricoPrecos;
   baselineAutomatico: number[];
   eventos: EventoDemanda[];
   datasSemana: string[];
@@ -186,6 +193,7 @@ export function CenariosGovernanca({
       estoque,
       restricoesEquipe,
       desperdicioHistorico,
+      historicoPrecos,
       baselineAutomatico,
       eventos,
       datasSemana,
@@ -224,7 +232,7 @@ export function CenariosGovernanca({
           <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Compare antes de montar</p>
           <h2 className="mt-1 font-display text-xl font-bold tracking-tight">Compare 3 estratégias para a mesma semana</h2>
           <p className="mt-2 text-sm leading-6 text-texto-suave">
-            Compare propostas com custo, restrições, desperdício, demanda, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
+            Compare propostas com custo, tendência de preço, restrições, desperdício, demanda, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
           </p>
         </div>
         <button

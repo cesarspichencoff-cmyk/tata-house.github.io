@@ -8,7 +8,7 @@ import {
   gerarCenariosGovernanca,
   podeCalibrarDemandaAutomaticamente,
 } from './governanca-candidatos';
-import type { Aceitacao, DiaCardapio, EstadoSemana, EventoDemanda, RegistroDesperdicio } from './tipos';
+import type { Aceitacao, DiaCardapio, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from './tipos';
 
 function diasFixture(): DiaCardapio[] {
   const principais = [
@@ -64,6 +64,13 @@ function aceitacaoFixture(): Aceitacao {
 const restricoesEquipe = {
   [normalizar('Frango grelhado')]: 2,
   [normalizar('Lombo suíno')]: 1,
+};
+
+const historicoPrecosAlta: HistoricoPrecos = {
+  [normalizar('Frango')]: [
+    { valor: 10, em: '2026-08-01T00:00:00Z' },
+    { valor: 12, em: '2026-08-08T00:00:00Z' },
+  ],
 };
 
 const desperdicioHistorico: RegistroDesperdicio[] = [
@@ -122,6 +129,31 @@ describe('governanca-candidatos', () => {
     expect(mapa[normalizar('Frango grelhado')].taxaMedia).toBeCloseTo(0.2, 6);
     expect(mapa[normalizar('Bife acebolado')].taxaMedia).toBeCloseTo(0.05, 6);
   });
+  it('mostra alta anormal de preço como risco sem alterar o custo por uma segunda penalização', () => {
+    const dias = diasFixture();
+    const precos = { [normalizar('Frango')]: 15 };
+    const comRadar = analisarCenarioGovernanca({
+      estadoBase: estadoFixture(),
+      dias,
+      precos,
+      aceitacao: aceitacaoFixture(),
+      frequencia: {},
+      historicoPrecos: historicoPrecosAlta,
+    });
+    const semRadar = analisarCenarioGovernanca({
+      estadoBase: estadoFixture(),
+      dias,
+      precos,
+      aceitacao: aceitacaoFixture(),
+      frequencia: {},
+      historicoPrecos: {},
+    });
+    expect(comRadar.itensPrecoAlta).toBeGreaterThanOrEqual(1);
+    expect(comRadar.maiorAltaPrecoPct).toBeGreaterThanOrEqual(15);
+    expect(comRadar.custoTotal).toBe(semRadar.custoTotal);
+    expect(comRadar.custoPorRefeicao).toBe(semRadar.custoPorRefeicao);
+  });
+
   it('analisa evidência sem inventar aceitação, conta repetição e mede impacto de restrições', () => {
     const dias = diasFixture();
     const metricas = analisarCenarioGovernanca({
@@ -135,6 +167,7 @@ describe('governanca-candidatos', () => {
       },
       restricoesEquipe,
       desperdicioHistorico,
+      historicoPrecos: historicoPrecosAlta,
     });
 
     expect(metricas.pratosComAceitacao).toBe(2); // n=1 não entra como evidência mínima
@@ -147,6 +180,7 @@ describe('governanca-candidatos', () => {
     expect(metricas.desperdicioMedioPct).toBe(15);
     expect(metricas.pratosComDesperdicio).toBe(2);
     expect(metricas.amostraDesperdicio).toBe(3);
+    expect(metricas.itensPrecoAlta).toBeGreaterThanOrEqual(0);
     expect(metricas.proteinasDistintas).toBe(4);
     expect(metricas.nutricaoMedia).toBeGreaterThanOrEqual(20);
     expect(metricas.nutricaoMedia).toBeLessThanOrEqual(100);
@@ -187,6 +221,7 @@ describe('governanca-candidatos', () => {
       estoque: {},
       restricoesEquipe,
       desperdicioHistorico,
+      historicoPrecos: historicoPrecosAlta,
       baselineAutomatico: estadoFixture().dias.map((d) => d.pessoas),
       eventos: [{ id: 'e1', data: '2026-09-07', rotulo: 'Treinamento', fator: 1.1 }],
       datasSemana: ['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12','2026-09-13'],
@@ -204,6 +239,7 @@ describe('governanca-candidatos', () => {
       expect(cenario.porques.some((p) => /restri/i.test(p))).toBe(true);
       expect(cenario.porques.some((p) => /desperd[ií]cio/i.test(p))).toBe(true);
       expect(cenario.porques.some((p) => /evento de demanda/i.test(p))).toBe(true);
+      expect(cenario.porques.some((p) => /radar|alta anormal/i.test(p))).toBe(true);
       expect(cenario.demanda.eventosAplicados).toBe(1);
       expect(cenario.fingerprint.length).toBeGreaterThan(20);
     }
