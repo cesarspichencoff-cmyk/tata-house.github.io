@@ -2,15 +2,23 @@ import { custoDaSemana } from './custo-semana';
 import {
   normalizar,
   notaNutricaoPrato,
+  PESSOAS_PADRAO,
   proteinaDoPrato,
   sugerirSemana,
   sugerirSemanaCriativa,
   sugerirSemanaHistorica,
   validarSemana,
 } from './motor';
-import type { Aceitacao, DiaCardapio, EstadoSemana } from './tipos';
+import {
+  aceitacaoParaPlanejamento,
+  demandaOficialPorDiaSemana,
+  evidenciaGovernancaAtual,
+  resumoOperacionalOficial,
+} from './governanca-readonly';
+import type { DiaCardapio, EstadoSemana } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
+export type AceitacaoPlanejamento = Record<string, { n: number; somaNotas: number }>;
 
 export interface MetricasCenarioGovernanca {
   custoTotal: number;
@@ -48,7 +56,7 @@ export interface ContextoCenariosGovernanca {
   estimativas?: Record<string, number>;
   fatores?: Record<string, number>;
   mostrarBasicos?: boolean;
-  aceitacao: Aceitacao;
+  aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
   estoque?: Record<string, number>;
 }
@@ -113,7 +121,7 @@ export function analisarCenarioGovernanca(args: {
   estimativas?: Record<string, number>;
   fatores?: Record<string, number>;
   mostrarBasicos?: boolean;
-  aceitacao: Aceitacao;
+  aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
 }): MetricasCenarioGovernanca {
   const estadoCandidato = aplicarCenarioAoEstado(args.estadoBase, args.dias);
@@ -229,28 +237,77 @@ function montarCenario(
   };
 }
 
+function contextoComInteligenciaOficial(
+  contexto: ContextoCenariosGovernanca,
+): { contexto: ContextoCenariosGovernanca; usouDemanda: number; amostraOficial: number; resumo: ReturnType<typeof resumoOperacionalOficial> } {
+  const evidencia = evidenciaGovernancaAtual();
+  const aceitacao = aceitacaoParaPlanejamento(contexto.aceitacao, evidencia);
+  const demanda = demandaOficialPorDiaSemana(evidencia);
+  let usouDemanda = 0;
+
+  const dias = contexto.estado.dias.map((dia, i) => {
+    const ref = demanda[i];
+    // Só calibra automaticamente quando o valor ainda é o baseline padrão.
+    // Se o gestor já mexeu no número de pessoas, a decisão humana prevalece.
+    if (!ref || ref.amostra < 2 || dia.pessoas !== PESSOAS_PADRAO[i]) return { ...dia };
+    usouDemanda += 1;
+    return { ...dia, pessoas: Math.max(1, Math.round(ref.mediaServido)) };
+  });
+
+  return {
+    contexto: {
+      ...contexto,
+      estado: { ...contexto.estado, dias },
+      aceitacao,
+    },
+    usouDemanda,
+    amostraOficial: evidencia?.principais.reduce((s, p) => s + p.amostraAvaliacoes, 0) ?? 0,
+    resumo: resumoOperacionalOficial(evidencia),
+  };
+}
+
 /**
  * Gera três estratégias com o motor existente. A camada não reimplementa o
- * motor: ela apenas compara saídas usando as mesmas fontes de custo/validação.
+ * motor: ela compara saídas usando custo/validação do House e, quando a
+ * Governança entregou evidência oficial, usa a nota agregada do Plus como
+ * fonte prioritária e a contagem real para calibrar apenas baselines intactos.
  */
 export function gerarCenariosGovernanca(
   contexto: ContextoCenariosGovernanca,
 ): CenarioGovernanca[] {
-  const pessoas = contexto.estado.dias.map((dia) => dia.pessoas);
+  const integrado = contextoComInteligenciaOficial(contexto);
+  const ctx = integrado.contexto;
+  const pessoas = ctx.estado.dias.map((dia) => dia.pessoas);
   const opts = {
-    aceitacao: contexto.aceitacao,
-    frequencia: contexto.frequencia,
-    estoque: contexto.estoque ?? {},
+    aceitacao: ctx.aceitacao,
+    frequencia: ctx.frequencia,
+    estoque: ctx.estoque ?? {},
   };
   const gerados: Array<[ModoCenarioGovernanca, DiaCardapio[] | null]> = [
-    ['historico', sugerirSemanaHistorica(pessoas, contexto.precos, opts)],
-    ['equilibrado', sugerirSemana(pessoas, contexto.precos, opts)],
-    ['criativo', sugerirSemanaCriativa(pessoas, contexto.precos, opts)],
+    ['historico', sugerirSemanaHistorica(pessoas, ctx.precos, opts)],
+    ['equilibrado', sugerirSemana(pessoas, ctx.precos, opts)],
+    ['criativo', sugerirSemanaCriativa(pessoas, ctx.precos, opts)],
   ];
 
   const cenarios = gerados
     .filter((item): item is [ModoCenarioGovernanca, DiaCardapio[]] => Array.isArray(item[1]) && item[1].length === 7)
-    .map(([modo, dias]) => montarCenario(modo, dias, contexto));
+    .map(([modo, dias]) => montarCenario(modo, dias, ctx))
+    .map((cenario) => {
+      const porques = [...cenario.porques];
+      if (integrado.amostraOficial > 0) {
+        porques.unshift(`Aceitação oficial do TATÁ Plus/QR carregada como fonte prioritária (${integrado.amostraOficial} voto(s) no recorte).`);
+      }
+      if (integrado.usouDemanda > 0) {
+        porques.unshift(`Contagem real de refeições calibrou ${integrado.usouDemanda} dia(s) que ainda estavam no baseline padrão; ajustes manuais do gestor foram preservados.`);
+      }
+      if (integrado.resumo?.diasComDesperdicioRegistrado) {
+        porques.push(`Há desperdício oficial registrado em ${integrado.resumo.diasComDesperdicioRegistrado} dia(s). O dado fica visível como evidência e não vira penalidade inventada sem unidade comparável.`);
+      }
+      if (integrado.resumo?.indiceSaudavelMedio !== null && integrado.resumo?.indiceSaudavelMedio !== undefined) {
+        porques.push(`Índice saudável oficial médio no recorte: ${integrado.resumo.indiceSaudavelMedio.toFixed(0)}/100.`);
+      }
+      return { ...cenario, porques };
+    });
 
   const vistos = new Map<string, ModoCenarioGovernanca>();
   return cenarios.map((cenario) => {
