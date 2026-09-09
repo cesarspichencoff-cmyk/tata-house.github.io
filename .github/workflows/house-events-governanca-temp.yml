@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-and-verify:
+  verify-materialized:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,19 +20,12 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: npm
-      - name: Apply events patch
-        run: node .github/scripts/apply-house-events-governanca-v1.mjs
-      - name: Diff safety
+      - name: Idempotence and scope
         run: |
+          node .github/scripts/apply-house-events-governanca-v1.mjs
           git diff --check
-          changed=$(git diff --name-only | sort)
-          expected=$(printf '%s\n' \
-            src/components/cardapio/CenariosGovernanca.tsx \
-            src/components/cardapio/PlanejadorGovernanca.tsx \
-            src/lib/cardapio/governanca-candidatos.test.ts \
-            src/lib/cardapio/governanca-candidatos.ts | sort)
-          test "$changed" = "$expected" || { echo "$changed"; exit 1; }
-          echo "HOUSE_EVENTS_SCOPE=PASS"
+          test -z "$(git diff --name-only)" || { git diff --name-only; exit 1; }
+          echo "HOUSE_EVENTS_MATERIALIZED_IDEMPOTENT=PASS"
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -48,15 +41,3 @@ jobs:
           echo "HOUSE_EVENTS_REUSES_EXISTING_FACTOR=PASS"
           echo "HOUSE_EVENTS_CLOSED_DAY_FAIL_CLOSED=PASS"
           echo "HOUSE_EVENTS_MANAGER_OVERRIDE=PASS"
-      - name: Commit verified product patch
-        run: |
-          if git diff --quiet; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            src/components/cardapio/CenariosGovernanca.tsx \
-            src/components/cardapio/PlanejadorGovernanca.tsx \
-            src/lib/cardapio/governanca-candidatos.test.ts \
-            src/lib/cardapio/governanca-candidatos.ts
-          git commit -m "feat(house): integrar eventos de demanda ao comparador"
-          git push
