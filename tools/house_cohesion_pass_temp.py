@@ -1,0 +1,471 @@
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str) -> None:
+    p = Path(path)
+    s = p.read_text()
+    n = s.count(old)
+    assert n == 1, f'{path}: esperado 1 match, veio {n}'
+    p.write_text(s.replace(old, new, 1))
+
+
+estado = 'src/lib/cardapio/estado.tsx'
+replace_once(
+    estado,
+    """function gravarLocal(chave: string, valor: unknown) {
+  try {
+    const resultado = gravarComRecuperacaoDeQuota(
+      localStorage,
+      PREFIXO + chave,
+      JSON.stringify(valor),
+    );
+    definirArmazenamentoLocalCheio(!resultado.ok);
+  } catch {
+    // Falha fora do fluxo normal de quota: mantém o aviso e nunca finge que salvou.
+    definirArmazenamentoLocalCheio(true);
+  }
+}
+""",
+    """function agendarNotificacaoLocal(chave: string) {
+  if (typeof window === 'undefined') return;
+  const emitir = () => window.dispatchEvent(new CustomEvent('tata:chave-externa', { detail: { chave } }));
+  if (typeof queueMicrotask === 'function') queueMicrotask(emitir);
+  else window.setTimeout(emitir, 0);
+}
+
+function gravarLocal(chave: string, valor: unknown) {
+  try {
+    const resultado = gravarComRecuperacaoDeQuota(
+      localStorage,
+      PREFIXO + chave,
+      JSON.stringify(valor),
+    );
+    definirArmazenamentoLocalCheio(!resultado.ok);
+    // O evento nativo `storage` não dispara na mesma aba. Agenda a
+    // notificação depois do updater atual para que outros hooks locais
+    // releiam a mesma fonte persistida sem updates React aninhados.
+    if (resultado.ok) agendarNotificacaoLocal(chave);
+  } catch {
+    // Falha fora do fluxo normal de quota: mantém o aviso e nunca finge que salvou.
+    definirArmazenamentoLocalCheio(true);
+  }
+}
+""",
+)
+
+replace_once(
+    estado,
+    """  // Média de pessoas/dia calculada das semanas registradas no app
+  let somaPessoas = 0;
+  let nDiasPessoas = 0;
+  semanas.forEach(({ estado }) => {
+    estado.dias.forEach((d) => {
+      if (d.principal && d.pessoas > 0) { somaPessoas += d.pessoas; nDiasPessoas++; }
+    });
+  });
+  const mediaPessoas = nDiasPessoas > 0 ? Math.round(somaPessoas / nDiasPessoas) : null;
+""",
+    """  // Pessoas/dia: contagem real prevalece quando existe. O planejado fica
+  // como fallback histórico para instalações que ainda não começaram a contar.
+  const contagensReais = lerLocal<ContagemRefeicoesDia[]>('contagemRefeicoes', []);
+  const totaisReais = contagensReais
+    .map((c) => Math.max(0, c.almoco) + Math.max(0, c.jantar) + Math.max(0, c.marmitas))
+    .filter((total) => total > 0);
+
+  let mediaPessoas: number | null = null;
+  if (totaisReais.length > 0) {
+    mediaPessoas = Math.round(totaisReais.reduce((s, n) => s + n, 0) / totaisReais.length);
+  } else {
+    let somaPessoas = 0;
+    let nDiasPessoas = 0;
+    semanas.forEach(({ estado }) => {
+      estado.dias.forEach((d) => {
+        if (d.principal && d.pessoas > 0) { somaPessoas += d.pessoas; nDiasPessoas++; }
+      });
+    });
+    mediaPessoas = nDiasPessoas > 0 ? Math.round(somaPessoas / nDiasPessoas) : null;
+  }
+""",
+)
+
+replace_once(
+    estado,
+    """/** Hook do DNA alimentar — recalcula no cliente quando monta. */
+export function useDna() {
+  const [dna, setDna] = useState<DnaAlimentar | null>(null);
+
+  const recalcular = useCallback(() => setDna(montarDnaAlimentar()), []);
+
+  useEffect(() => { recalcular(); }, [recalcular]);
+  // votos do QR e mudanças de aceitação chegam por fora — recalcula o DNA
+  useReleituraExterna('aceitacao', recalcular);
+
+  return { dna, recalcular };
+}
+""",
+    """/** Hook do DNA alimentar — recalcula quando qualquer evidência que o forma muda. */
+export function useDna() {
+  const [dna, setDna] = useState<DnaAlimentar | null>(null);
+
+  const recalcular = useCallback(() => setDna(montarDnaAlimentar()), []);
+
+  useEffect(() => { recalcular(); }, [recalcular]);
+  useEffect(() => {
+    const relevante = (chave: string) =>
+      chave === 'aceitacao' ||
+      chave === 'contagemRefeicoes' ||
+      chave === 'mediaRefeicoes' ||
+      chave.startsWith('semana.') ||
+      chave.startsWith('desperdicio.');
+    const onExterno = (e: Event) => {
+      const chave = (e as CustomEvent<{ chave?: string }>).detail?.chave ?? '';
+      if (relevante(chave)) recalcular();
+    };
+    const onStorage = (e: StorageEvent) => {
+      const chave = e.key?.startsWith(PREFIXO) ? e.key.slice(PREFIXO.length) : '';
+      if (relevante(chave)) recalcular();
+    };
+    window.addEventListener(EVENTO_CHAVE, onExterno);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(EVENTO_CHAVE, onExterno);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [recalcular]);
+
+  return { dna, recalcular };
+}
+""",
+)
+
+planejador = 'src/components/cardapio/PlanejadorGovernanca.tsx'
+replace_once(
+    planejador,
+    "import { normalizar } from '@/lib/cardapio/motor';",
+    "import { listaDoDia, normalizar } from '@/lib/cardapio/motor';",
+)
+replace_once(
+    planejador,
+    """} from '@/lib/cardapio/governanca-restricoes';
+""",
+    """} from '@/lib/cardapio/governanca-restricoes';
+import {
+  estoqueOficialParaPlanejamento,
+  instalarHandoffEstoqueGovernanca,
+  solicitarEstoqueGovernanca,
+  type SnapshotEstoqueGovernancaV1,
+} from '@/lib/cardapio/governanca-estoque-oficial';
+""",
+)
+replace_once(
+    planejador,
+    "  const [restricoesOficiais, setRestricoesOficiais] = useState<SnapshotRestricoesGovernancaV1 | null>(null);",
+    "  const [restricoesOficiais, setRestricoesOficiais] = useState<SnapshotRestricoesGovernancaV1 | null>(null);\n  const [estoqueOficial, setEstoqueOficial] = useState<SnapshotEstoqueGovernancaV1 | null>(null);",
+)
+replace_once(
+    planejador,
+    """  const estoqueQuantidade = useMemo(() => Object.fromEntries(
+    Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
+  ), [estoque]);
+""",
+    """  const estoqueLocalQuantidade = useMemo(() => Object.fromEntries(
+    Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
+  ), [estoque]);
+  const itensEstoqueOficial = useMemo(() => {
+    const vistos = new Map<string, string>();
+    estado.dias.forEach((dia) => {
+      listaDoDia(dia, fatores).forEach((item) => {
+        const chave = normalizar(item.item);
+        if (chave && !vistos.has(chave)) vistos.set(chave, item.item);
+      });
+    });
+    return Array.from(vistos.values());
+  }, [estado.dias, fatores]);
+  const estoqueQuantidade = useMemo(() => ({
+    ...estoqueLocalQuantidade,
+    ...estoqueOficialParaPlanejamento(estoqueOficial, contexto.unidadeFonte),
+  }), [estoqueLocalQuantidade, estoqueOficial, contexto.unidadeFonte]);
+""",
+)
+
+restr_effect = """  useEffect(() => instalarHandoffRestricoesGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setRestricoesOficiais,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+"""
+replace_once(
+    planejador,
+    restr_effect,
+    restr_effect + """
+  useEffect(() => instalarHandoffEstoqueGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setEstoqueOficial,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+""",
+)
+
+restr_request = """  useEffect(() => {
+    const itens = itensDaSemanaParaRestricoes(estado.dias);
+    if (!itens.length) { setRestricoesOficiais(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarRestricoesGovernanca({ unidade: contexto.unidadeFonte, semanaId: contexto.semanaId, itens });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, estado.dias]);
+"""
+replace_once(
+    planejador,
+    restr_request,
+    restr_request + """
+  useEffect(() => {
+    if (!itensEstoqueOficial.length) { setEstoqueOficial(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarEstoqueGovernanca({
+        unidade: contexto.unidadeFonte,
+        semanaId: contexto.semanaId,
+        itens: itensEstoqueOficial,
+      });
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, itensEstoqueOficial]);
+""",
+)
+
+readonly_banner = """        {evidenciaReadOnly && (
+          <section data-testid=\"evidencia-readonly-lideres\" className=\"rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100\">
+            <strong>Histórico oficial carregado:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Usado somente para analisar esta semana.
+          </section>
+        )}
+"""
+replace_once(
+    planejador,
+    readonly_banner,
+    readonly_banner + """
+        {estoqueOficial && (
+          <section data-testid=\"estoque-oficial-lideres\" className=\"rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100\">
+            <strong>Estoque oficial carregado:</strong> {estoqueOficial.itens.length} item(ns) unívoco(s) · {estoqueOficial.ambiguos.length} ambíguo(s) · {estoqueOficial.semContagem.length} sem contagem. Somente contagens recentes entram no bônus leve do planejamento; itens ambíguos ficam fora.
+          </section>
+        )}
+""",
+)
+
+Path('src/lib/cardapio/governanca-estoque-oficial.ts').write_text(r"""'use client';
+
+import { normalizar } from './motor';
+
+export const GOV_ESTOQUE_REQUEST_V1 = 'tata-house:governanca:estoque:request:v1' as const;
+export const GOV_ESTOQUE_RESPONSE_V1 = 'tata-house:governanca:estoque:response:v1' as const;
+export const ORIGEM_GOVERNANCA_ESTOQUE_V1 = 'https://lideres.tatasushi.tech' as const;
+export const MAX_IDADE_CONTAGEM_ESTOQUE_DIAS = 8;
+
+const CONTRATO = 'tata-house-governanca-estoque-readonly' as const;
+const FONTE = 'public.inventario_minimo+public.inventario_contagem' as const;
+const DATA_RE = /^\d{4}-\d{2}-\d{2}$/;
+const SEMANA_RE = /^(\d{4})-S(\d{2})$/;
+const MAX_ITENS = 160;
+
+export interface ItemEstoqueGovernancaV1 {
+  item: string;
+  chave: string;
+  departamento: string;
+  unidadeMedida: string;
+  estoqueAtual: number;
+  dataContagem: string;
+}
+
+export interface SnapshotEstoqueGovernancaV1 {
+  contrato: typeof CONTRATO;
+  versao: 1;
+  modo: 'read-only';
+  origem: 'lideres';
+  fonte: typeof FONTE;
+  carregadoEm: string;
+  unidade: string;
+  semanaId: string;
+  itensConsultados: number;
+  itens: ItemEstoqueGovernancaV1[];
+  ambiguos: string[];
+  semContagem: string[];
+}
+
+function texto(v: unknown, max = 160): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+function chavesExatas(obj: Record<string, unknown>, campos: string[]): boolean {
+  const permitidas = new Set(campos);
+  return Object.keys(obj).every((k) => permitidas.has(k)) && campos.every((k) => Object.prototype.hasOwnProperty.call(obj, k));
+}
+
+function dataValida(v: string): boolean {
+  if (!DATA_RE.test(v)) return false;
+  const [a, m, d] = v.split('-').map(Number);
+  const dt = new Date(Date.UTC(a, m - 1, d));
+  return dt.getUTCFullYear() === a && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+function semanaValida(v: string): boolean {
+  const m = SEMANA_RE.exec(v);
+  const n = m ? Number(m[2]) : 0;
+  return !!m && Number.isInteger(n) && n >= 1 && n <= 53;
+}
+
+function stringsUnicas(v: unknown): string[] | null {
+  if (!Array.isArray(v) || v.length > MAX_ITENS) return null;
+  const vistos = new Set<string>();
+  const out: string[] = [];
+  for (const bruto of v) {
+    const item = texto(bruto, 120);
+    const chave = normalizar(item);
+    if (!item || !chave) return null;
+    if (!vistos.has(chave)) { vistos.add(chave); out.push(item); }
+  }
+  return out;
+}
+
+function normalizarItem(v: unknown, unidade: string): ItemEstoqueGovernancaV1 | null {
+  if (!v || typeof v !== 'object') return null;
+  const e = v as Record<string, unknown>;
+  if (!chavesExatas(e, ['item','chave','departamento','unidadeMedida','estoqueAtual','dataContagem'])) return null;
+  const item = texto(e.item, 120);
+  const chave = texto(e.chave, 160);
+  const departamento = texto(e.departamento, 100);
+  const unidadeMedida = texto(e.unidadeMedida, 40);
+  const estoqueAtual = e.estoqueAtual;
+  const dataContagem = texto(e.dataContagem, 10);
+  if (!item || !chave || chave !== normalizar(item) || !departamento || !unidadeMedida || typeof estoqueAtual !== 'number' || !Number.isFinite(estoqueAtual) || estoqueAtual < 0 || !dataValida(dataContagem) || !unidade) return null;
+  return { item, chave, departamento, unidadeMedida, estoqueAtual, dataContagem };
+}
+
+export function normalizarSnapshotEstoqueGovernanca(entrada: unknown): SnapshotEstoqueGovernancaV1 | null {
+  if (!entrada || typeof entrada !== 'object') return null;
+  const e = entrada as Record<string, unknown>;
+  if (!chavesExatas(e, ['contrato','versao','modo','origem','fonte','carregadoEm','unidade','semanaId','itensConsultados','itens','ambiguos','semContagem'])) return null;
+  if (e.contrato !== CONTRATO || e.versao !== 1 || e.modo !== 'read-only' || e.origem !== 'lideres' || e.fonte !== FONTE) return null;
+  const carregadoEm = texto(e.carregadoEm, 40);
+  const unidade = texto(e.unidade, 80);
+  const semanaId = texto(e.semanaId, 16);
+  const itensConsultados = e.itensConsultados;
+  if (!carregadoEm || Number.isNaN(Date.parse(carregadoEm)) || !unidade || !semanaValida(semanaId) || typeof itensConsultados !== 'number' || !Number.isInteger(itensConsultados) || itensConsultados < 0 || itensConsultados > MAX_ITENS || !Array.isArray(e.itens) || e.itens.length > MAX_ITENS) return null;
+  const itens = e.itens.map((item) => normalizarItem(item, unidade));
+  const ambiguos = stringsUnicas(e.ambiguos);
+  const semContagem = stringsUnicas(e.semContagem);
+  if (itens.some((item) => item === null) || !ambiguos || !semContagem) return null;
+  const chaves = new Set<string>();
+  for (const item of itens as ItemEstoqueGovernancaV1[]) {
+    if (chaves.has(item.chave)) return null;
+    chaves.add(item.chave);
+  }
+  const amb = new Set(ambiguos.map(normalizar));
+  if ((itens as ItemEstoqueGovernancaV1[]).some((item) => amb.has(item.chave))) return null;
+  return { contrato: CONTRATO, versao: 1, modo: 'read-only', origem: 'lideres', fonte: FONTE, carregadoEm, unidade, semanaId, itensConsultados, itens: itens as ItemEstoqueGovernancaV1[], ambiguos, semContagem };
+}
+
+function idadeEmDias(dataIso: string, agora: Date): number {
+  const dt = new Date(`${dataIso}T12:00:00Z`);
+  return Math.floor((agora.getTime() - dt.getTime()) / 86400000);
+}
+
+export function estoqueOficialParaPlanejamento(
+  snapshot: SnapshotEstoqueGovernancaV1 | null,
+  unidadeEsperada: string,
+  agora: Date = new Date(),
+): Record<string, number> {
+  const s = normalizarSnapshotEstoqueGovernanca(snapshot);
+  if (!s || s.unidade !== unidadeEsperada) return {};
+  const out: Record<string, number> = {};
+  s.itens.forEach((item) => {
+    const idade = idadeEmDias(item.dataContagem, agora);
+    if (idade < 0 || idade > MAX_IDADE_CONTAGEM_ESTOQUE_DIAS) return;
+    out[item.chave] = item.estoqueAtual;
+  });
+  return out;
+}
+
+export function solicitarEstoqueGovernanca(args: { unidade: string; semanaId: string; itens: string[] }): boolean {
+  if (typeof window === 'undefined') return false;
+  const unidade = texto(args.unidade, 80);
+  const semanaId = texto(args.semanaId, 16);
+  const itens = stringsUnicas(args.itens);
+  if (!unidade || !semanaValida(semanaId) || !itens?.length) return false;
+  const alvo = window.parent !== window ? window.parent : window.opener && !window.opener.closed ? window.opener : null;
+  if (!alvo) return false;
+  try {
+    alvo.postMessage({ type: GOV_ESTOQUE_REQUEST_V1, versao: 1, unidade, semanaId, itens }, ORIGEM_GOVERNANCA_ESTOQUE_V1);
+    return true;
+  } catch { return false; }
+}
+
+export function instalarHandoffEstoqueGovernanca(args: {
+  unidadeEsperada: string;
+  semanaEsperada: string;
+  aoSnapshot: (snapshot: SnapshotEstoqueGovernancaV1) => void;
+}): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const handler = (event: MessageEvent) => {
+    if (event.origin !== ORIGEM_GOVERNANCA_ESTOQUE_V1) return;
+    const fonteValida = event.source === window.parent || (!!window.opener && event.source === window.opener);
+    if (!fonteValida || !event.data || typeof event.data !== 'object' || event.data.type !== GOV_ESTOQUE_RESPONSE_V1) return;
+    const snapshot = normalizarSnapshotEstoqueGovernanca(event.data.payload);
+    if (!snapshot || snapshot.unidade !== args.unidadeEsperada || snapshot.semanaId !== args.semanaEsperada) return;
+    args.aoSnapshot(snapshot);
+  };
+  window.addEventListener('message', handler);
+  return () => window.removeEventListener('message', handler);
+}
+""")
+
+Path('src/lib/cardapio/governanca-estoque-oficial.test.ts').write_text(r"""import { describe, expect, it } from 'vitest';
+import {
+  estoqueOficialParaPlanejamento,
+  MAX_IDADE_CONTAGEM_ESTOQUE_DIAS,
+  normalizarSnapshotEstoqueGovernanca,
+} from './governanca-estoque-oficial';
+
+const base = {
+  contrato: 'tata-house-governanca-estoque-readonly',
+  versao: 1,
+  modo: 'read-only',
+  origem: 'lideres',
+  fonte: 'public.inventario_minimo+public.inventario_contagem',
+  carregadoEm: '2026-09-09T12:00:00Z',
+  unidade: 'Itaim',
+  semanaId: '2026-S37',
+  itensConsultados: 4,
+  itens: [
+    { item: 'Arroz', chave: 'arroz', departamento: 'Cozinha', unidadeMedida: 'kg', estoqueAtual: 18, dataContagem: '2026-09-08' },
+    { item: 'Feijão', chave: 'feijao', departamento: 'Cozinha', unidadeMedida: 'kg', estoqueAtual: 9, dataContagem: '2026-08-20' },
+  ],
+  ambiguos: ['Óleo'],
+  semContagem: ['Sal'],
+} as const;
+
+describe('governanca-estoque-oficial', () => {
+  it('aceita somente o snapshot minimizado e rejeita campos extras', () => {
+    expect(normalizarSnapshotEstoqueGovernanca(base)?.unidade).toBe('Itaim');
+    expect(normalizarSnapshotEstoqueGovernanca({ ...base, token: 'proibido' })).toBeNull();
+  });
+
+  it('usa somente item unívoco e contagem recente da unidade exata', () => {
+    const estoque = estoqueOficialParaPlanejamento(base as any, 'Itaim', new Date('2026-09-09T12:00:00Z'));
+    expect(estoque).toEqual({ arroz: 18 });
+    expect(estoqueOficialParaPlanejamento(base as any, 'Pinheiros', new Date('2026-09-09T12:00:00Z'))).toEqual({});
+  });
+
+  it('trata contagem mais antiga que a janela semanal como stale', () => {
+    expect(MAX_IDADE_CONTAGEM_ESTOQUE_DIAS).toBe(8);
+    const estoque = estoqueOficialParaPlanejamento(base as any, 'Itaim', new Date('2026-09-18T12:00:00Z'));
+    expect(estoque).toEqual({});
+  });
+
+  it('falha fechado quando item também aparece como ambíguo', () => {
+    expect(normalizarSnapshotEstoqueGovernanca({ ...base, ambiguos: ['Arroz'] })).toBeNull();
+  });
+});
+""")
+
+legado = Path('src/components/cardapio/ContadorRefeicoes.tsx')
+assert legado.exists(), 'contador legado não encontrado'
+legado.unlink()
