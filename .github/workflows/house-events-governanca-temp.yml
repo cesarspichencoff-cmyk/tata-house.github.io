@@ -1,0 +1,62 @@
+name: House Events Governanca Temp
+
+on:
+  push:
+    branches:
+      - feat/house-plus-intelligence-v2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Apply events patch
+        run: node .github/scripts/apply-house-events-governanca-v1.mjs
+      - name: Diff safety
+        run: |
+          git diff --check
+          changed=$(git diff --name-only | sort)
+          expected=$(printf '%s\n' \
+            src/components/cardapio/CenariosGovernanca.tsx \
+            src/components/cardapio/PlanejadorGovernanca.tsx \
+            src/lib/cardapio/governanca-candidatos.test.ts \
+            src/lib/cardapio/governanca-candidatos.ts | sort)
+          test "$changed" = "$expected" || { echo "$changed"; exit 1; }
+          echo "HOUSE_EVENTS_SCOPE=PASS"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Event safety contract
+        run: |
+          grep -Fq "fator === 0" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "não sobrescreveu a quantidade ajustada manualmente" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "useEventos" src/components/cardapio/PlanejadorGovernanca.tsx
+          grep -Fq 'label="Demanda"' src/components/cardapio/CenariosGovernanca.tsx
+          grep -Fq "evento não atropela ajuste humano" src/lib/cardapio/governanca-candidatos.test.ts
+          echo "HOUSE_EVENTS_REUSES_EXISTING_FACTOR=PASS"
+          echo "HOUSE_EVENTS_CLOSED_DAY_FAIL_CLOSED=PASS"
+          echo "HOUSE_EVENTS_MANAGER_OVERRIDE=PASS"
+      - name: Commit verified product patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/components/cardapio/CenariosGovernanca.tsx \
+            src/components/cardapio/PlanejadorGovernanca.tsx \
+            src/lib/cardapio/governanca-candidatos.test.ts \
+            src/lib/cardapio/governanca-candidatos.ts
+          git commit -m "feat(house): integrar eventos de demanda ao comparador"
+          git push
