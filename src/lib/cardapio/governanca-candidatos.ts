@@ -1,16 +1,27 @@
 import { custoDaSemana } from './custo-semana';
 import {
+  listaDoDia,
   normalizar,
   notaNutricaoPrato,
+  PESSOAS_PADRAO,
   proteinaDoPrato,
   sugerirSemana,
   sugerirSemanaCriativa,
   sugerirSemanaHistorica,
   validarSemana,
 } from './motor';
-import type { Aceitacao, DiaCardapio, EstadoSemana } from './tipos';
+import {
+  aceitacaoParaPlanejamento,
+  demandaOficialPorDiaSemana,
+  evidenciaGovernancaAtual,
+  resumoOperacionalOficial,
+} from './governanca-readonly';
+import { impactoRestricoesLocais } from './governanca-restricoes';
+import { analisarRadar } from './radar';
+import type { DiaCardapio, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
+export type AceitacaoPlanejamento = Record<string, { n: number; somaNotas: number }>;
 
 export interface MetricasCenarioGovernanca {
   custoTotal: number;
@@ -23,6 +34,13 @@ export interface MetricasCenarioGovernanca {
   votosAceitacao: number;
   pratosRecentes: number;
   ocorrenciasRecentes: number;
+  ocorrenciasRestricao: number;
+  pessoasRestricaoSomadas: number;
+  desperdicioMedioPct: number | null;
+  pratosComDesperdicio: number;
+  amostraDesperdicio: number;
+  itensPrecoAlta: number;
+  maiorAltaPrecoPct: number | null;
   nutricaoMedia: number;
   proteinasDistintas: number;
   erros: number;
@@ -40,6 +58,7 @@ export interface CenarioGovernanca {
   porques: string[];
   fingerprint: string;
   semelhanteA?: ModoCenarioGovernanca;
+  demanda: { eventosAplicados: number; eventosRevisao: number; ajustesHumanosPreservados: number };
 }
 
 export interface ContextoCenariosGovernanca {
@@ -48,9 +67,18 @@ export interface ContextoCenariosGovernanca {
   estimativas?: Record<string, number>;
   fatores?: Record<string, number>;
   mostrarBasicos?: boolean;
-  aceitacao: Aceitacao;
+  aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
   estoque?: Record<string, number>;
+  restricoesEquipe?: Record<string, number>;
+  desperdicioHistorico?: RegistroDesperdicio[];
+  historicoPrecos?: HistoricoPrecos;
+  /** Pessoas geradas automaticamente pelo próprio House antes de qualquer ajuste humano. */
+  baselineAutomatico?: number[];
+  /** Eventos manuais já existentes no House; fator segue a semântica do módulo de previsão. */
+  eventos?: EventoDemanda[];
+  /** Datas ISO (yyyy-mm-dd), 0=segunda … 6=domingo, da semana autorizada. */
+  datasSemana?: string[];
 }
 
 const META: Record<ModoCenarioGovernanca, { titulo: string; selo: string; descricao: string }> = {
@@ -98,6 +126,25 @@ export function aplicarCenarioAoEstado(
   };
 }
 
+export interface DesperdicioPratoPlanejamento { taxaMedia: number; n: number; }
+
+/** Taxa adimensional por prato. Cada registro é normalizado dentro da própria unidade
+ * (kg ou porções), portanto nunca somamos quantidades incompatíveis. */
+export function agregarDesperdicioHistorico(registros: RegistroDesperdicio[]): Record<string, DesperdicioPratoPlanejamento> {
+  const acc: Record<string, { soma: number; n: number }> = {};
+  registros.forEach((r) => {
+    if (!(r.produzido > 0) || !Number.isFinite(r.consumido)) return;
+    const chave = normalizar(r.prato);
+    if (!chave) return;
+    const taxa = Math.max(0, Math.min(1, (r.produzido - r.consumido) / r.produzido));
+    const atual = acc[chave] ?? { soma: 0, n: 0 };
+    atual.soma += taxa;
+    atual.n += 1;
+    acc[chave] = atual;
+  });
+  return Object.fromEntries(Object.entries(acc).map(([chave, v]) => [chave, { taxaMedia: v.soma / v.n, n: v.n }]));
+}
+
 function fingerprintDias(dias: DiaCardapio[]): string {
   return dias
     .map((dia) => [dia.principal, dia.guarnicaoFixa, dia.guarnicao, dia.salada, dia.sobremesa]
@@ -113,8 +160,11 @@ export function analisarCenarioGovernanca(args: {
   estimativas?: Record<string, number>;
   fatores?: Record<string, number>;
   mostrarBasicos?: boolean;
-  aceitacao: Aceitacao;
+  aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
+  restricoesEquipe?: Record<string, number>;
+  desperdicioHistorico?: RegistroDesperdicio[];
+  historicoPrecos?: HistoricoPrecos;
 }): MetricasCenarioGovernanca {
   const estadoCandidato = aplicarCenarioAoEstado(args.estadoBase, args.dias);
   const custo = custoDaSemana(
@@ -160,6 +210,41 @@ export function analisarCenarioGovernanca(args: {
     ? Math.max(0, Math.min(1, 1 - custo.itensSemPreco / custo.itens))
     : 0;
   const coberturaDadosPct = Math.round(((coberturaAceitacao + coberturaPreco) / 2) * 100);
+  const impactoRestricoes = impactoRestricoesLocais(args.dias, args.restricoesEquipe ?? {});
+  const desperdicio = agregarDesperdicioHistorico(args.desperdicioHistorico ?? []);
+  let somaTaxasDesperdicio = 0;
+  let amostraDesperdicio = 0;
+  let pratosComDesperdicio = 0;
+  args.dias.forEach((dia) => {
+    const d = desperdicio[normalizar(dia.principal)];
+    if (!d || d.n <= 0) return;
+    somaTaxasDesperdicio += d.taxaMedia * d.n;
+    amostraDesperdicio += d.n;
+    pratosComDesperdicio += 1;
+  });
+  const desperdicioMedioPct = amostraDesperdicio > 0
+    ? Math.round((somaTaxasDesperdicio / amostraDesperdicio) * 100)
+    : null;
+
+  // O custo já usa o preço atual. O radar entra somente como risco visível,
+  // sem uma segunda penalização no score do cenário. Reutiliza o limiar oficial
+  // do módulo radar (alta anormal >=15% desde a última cotação).
+  const altas = new Map(
+    analisarRadar(args.precos, args.historicoPrecos ?? {})
+      .filter((r) => r.alerta === 'alta' && r.variacao !== null)
+      .map((r) => [r.norm, r]),
+  );
+  const altasUsadas = new Map<string, number>();
+  args.dias.forEach((dia) => {
+    listaDoDia(dia, args.fatores, { mostrarBasicos: args.mostrarBasicos }).forEach((item) => {
+      const chave = normalizar(item.item);
+      const alta = altas.get(chave);
+      if (alta?.variacao !== null && alta?.variacao !== undefined) altasUsadas.set(chave, alta.variacao);
+    });
+  });
+  const maiorAltaPrecoPct = altasUsadas.size
+    ? Math.round(Math.max(...Array.from(altasUsadas.values())) * 100)
+    : null;
 
   return {
     custoTotal: custo.total,
@@ -172,6 +257,13 @@ export function analisarCenarioGovernanca(args: {
     votosAceitacao,
     pratosRecentes,
     ocorrenciasRecentes,
+    ocorrenciasRestricao: impactoRestricoes.ocorrencias,
+    pessoasRestricaoSomadas: impactoRestricoes.pessoasSomadas,
+    desperdicioMedioPct,
+    pratosComDesperdicio,
+    amostraDesperdicio,
+    itensPrecoAlta: altasUsadas.size,
+    maiorAltaPrecoPct,
     nutricaoMedia: Math.round(nutricaoMedia),
     proteinasDistintas: proteinas.size,
     erros: avisos.filter((a) => a.nivel === 'erro').length,
@@ -196,6 +288,12 @@ function construirPorques(
   }
   if (m.pratosRecentes > 0) itens.push(`${m.pratosRecentes}/7 principais apareceram nas semanas recentes (${m.ocorrenciasRecentes} ocorrência(s) somadas).`);
   else itens.push('Nenhum principal deste cenário aparece no recorte recente carregado.');
+  if (m.ocorrenciasRestricao > 0) itens.push(`O cadastro de funcionários do House detectou ${m.ocorrenciasRestricao} conflito(s) de restrição (${m.pessoasRestricaoSomadas} impacto(s) pessoa-dia). O cenário exige correção antes da decisão.`);
+  else itens.push('Nenhum conflito foi encontrado nas restrições cadastradas no módulo de funcionários do House.');
+  if (m.desperdicioMedioPct !== null) itens.push(`Histórico House dos principais deste cenário: desperdício médio ${m.desperdicioMedioPct}% em ${m.amostraDesperdicio} registro(s), cobrindo ${m.pratosComDesperdicio}/7 prato(s). A taxa é normalizada dentro de cada registro; kg e porções nunca são somados.`);
+  else itens.push('Ainda não há amostra de desperdício House para os principais deste cenário; o sistema não inventa penalidade.');
+  if (m.itensPrecoAlta > 0) itens.push(`${m.itensPrecoAlta} insumo(s) desta proposta estão em alta anormal no radar de preços${m.maiorAltaPrecoPct !== null ? `; maior alta ${m.maiorAltaPrecoPct}%` : ''}. O custo atual já incorpora o preço vigente; a tendência é mostrada como risco e não é penalizada duas vezes.`);
+  else itens.push('Nenhum insumo desta proposta com histórico suficiente está em alta anormal no radar atual.');
   if (m.itensSemPreco > 0) itens.push(`${m.itensSemPreco} item(ns) continuam sem preço; custo deve ser tratado como incompleto.`);
   else if (m.itensEstimados > 0) itens.push(`Custo usa ${m.itensEstimados} preço(s) estimado(s); a tela distingue estimativa de preço real.`);
   else if (m.custoPorRefeicao !== null) itens.push('O custo foi calculado pela fonte única oficial da semana, sem uma calculadora paralela.');
@@ -218,6 +316,9 @@ function montarCenario(
     mostrarBasicos: contexto.mostrarBasicos,
     aceitacao: contexto.aceitacao,
     frequencia: contexto.frequencia,
+    restricoesEquipe: contexto.restricoesEquipe,
+    desperdicioHistorico: contexto.desperdicioHistorico,
+    historicoPrecos: contexto.historicoPrecos,
   });
   return {
     id: modo,
@@ -226,31 +327,210 @@ function montarCenario(
     metricas,
     porques: construirPorques(modo, metricas),
     fingerprint: fingerprintDias(dias),
+    demanda: { eventosAplicados: 0, eventosRevisao: 0, ajustesHumanosPreservados: 0 },
   };
+}
+
+export function podeCalibrarDemandaAutomaticamente(
+  pessoasAtual: number,
+  indice: number,
+  baselineAutomatico?: number[],
+): boolean {
+  const aprendido = baselineAutomatico?.[indice];
+  if (typeof aprendido === 'number' && Number.isFinite(aprendido) && aprendido > 0) {
+    return pessoasAtual === Math.round(aprendido);
+  }
+  return pessoasAtual === PESSOAS_PADRAO[indice];
+}
+
+export interface ResultadoEventosDemandaGovernanca {
+  dias: DiaCardapio[];
+  eventosAplicados: number;
+  eventosRevisao: number;
+  ajustesHumanosPreservados: number;
+  mensagens: string[];
+}
+
+/**
+ * Reusa a semântica de EventoDemanda já existente no House: fator multiplica demanda.
+ * No comparador, porém, evento nunca atropela ajuste humano e fator=0 (fechado)
+ * exige decisão explícita porque o modelo atual ainda mantém sete pratos na semana.
+ */
+export function aplicarEventosDemandaGovernanca(args: {
+  dias: DiaCardapio[];
+  diasOriginais: DiaCardapio[];
+  eventos?: EventoDemanda[];
+  datasSemana?: string[];
+  baselineAutomatico?: number[];
+}): ResultadoEventosDemandaGovernanca {
+  const dias = clonarDias(args.dias);
+  const mensagens: string[] = [];
+  let eventosAplicados = 0;
+  let eventosRevisao = 0;
+  let ajustesHumanosPreservados = 0;
+  if (!Array.isArray(args.datasSemana) || args.datasSemana.length !== 7) {
+    return { dias, eventosAplicados, eventosRevisao, ajustesHumanosPreservados, mensagens };
+  }
+  const eventos = Array.isArray(args.eventos) ? args.eventos : [];
+  dias.forEach((dia, i) => {
+    const data = args.datasSemana?.[i];
+    const doDia = eventos.filter((e) => e.data === data);
+    if (!doDia.length) return;
+    if (doDia.length > 1) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: há ${doDia.length} eventos cadastrados para o mesmo dia; nenhum fator foi aplicado automaticamente.`);
+      return;
+    }
+    const evento = doDia[0];
+    const fator = Number(evento.fator);
+    if (!Number.isFinite(fator) || fator < 0) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: o evento “${evento.rotulo}” tem fator inválido e foi mantido somente para revisão.`);
+      return;
+    }
+    if (fator === 0) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: “${evento.rotulo}” marca dia fechado (fator 0). O comparador não cria fechamento sozinho; exige decisão humana.`);
+      return;
+    }
+    const original = args.diasOriginais[i];
+    if (!original || !podeCalibrarDemandaAutomaticamente(original.pessoas, i, args.baselineAutomatico)) {
+      ajustesHumanosPreservados += 1;
+      mensagens.push(`${data}: “${evento.rotulo}” não sobrescreveu a quantidade ajustada manualmente pelo gestor.`);
+      return;
+    }
+    dia.pessoas = Math.max(1, Math.round(dia.pessoas * fator));
+    eventosAplicados += 1;
+    mensagens.push(`${data}: “${evento.rotulo}” aplicou fator ${fator.toFixed(2)} sobre a demanda automática.`);
+  });
+  return { dias, eventosAplicados, eventosRevisao, ajustesHumanosPreservados, mensagens };
+}
+
+function contextoComInteligenciaOficial(
+  contexto: ContextoCenariosGovernanca,
+): { contexto: ContextoCenariosGovernanca; usouDemanda: number; amostraOficial: number; resumo: ReturnType<typeof resumoOperacionalOficial>; eventos: Omit<ResultadoEventosDemandaGovernanca, 'dias'> } {
+  const evidencia = evidenciaGovernancaAtual();
+  const aceitacao = aceitacaoParaPlanejamento(contexto.aceitacao, evidencia);
+  const demanda = demandaOficialPorDiaSemana(evidencia);
+  let usouDemanda = 0;
+
+  const diasCalibrados = contexto.estado.dias.map((dia, i) => {
+    const ref = demanda[i];
+    // O baseline automático pode já ter sido aprendido pelo próprio House e, portanto,
+    // ser diferente do PESSOAS_PADRAO. Só a alteração humana bloqueia a calibração oficial.
+    if (!ref || ref.amostra < 2 || !podeCalibrarDemandaAutomaticamente(dia.pessoas, i, contexto.baselineAutomatico)) return { ...dia };
+    usouDemanda += 1;
+    return { ...dia, pessoas: Math.max(1, Math.round(ref.mediaServido)) };
+  });
+
+  const eventosAplicados = aplicarEventosDemandaGovernanca({
+    dias: diasCalibrados,
+    diasOriginais: contexto.estado.dias,
+    eventos: contexto.eventos,
+    datasSemana: contexto.datasSemana,
+    baselineAutomatico: contexto.baselineAutomatico,
+  });
+
+  return {
+    contexto: {
+      ...contexto,
+      estado: { ...contexto.estado, dias: eventosAplicados.dias },
+      aceitacao,
+    },
+    usouDemanda,
+    amostraOficial: evidencia?.principais.reduce((s, p) => s + p.amostraAvaliacoes, 0) ?? 0,
+    resumo: resumoOperacionalOficial(evidencia),
+    eventos: {
+      eventosAplicados: eventosAplicados.eventosAplicados,
+      eventosRevisao: eventosAplicados.eventosRevisao,
+      ajustesHumanosPreservados: eventosAplicados.ajustesHumanosPreservados,
+      mensagens: eventosAplicados.mensagens,
+    },
+  };
+}
+
+function gerarComMenorImpacto(
+  gerador: () => DiaCardapio[] | null,
+  restricoes: Record<string, number>,
+  desperdicioHistorico: RegistroDesperdicio[],
+): DiaCardapio[] | null {
+  let melhor: DiaCardapio[] | null = null;
+  let melhorPeso = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 4; i += 1) {
+    const dias = gerador();
+    if (!Array.isArray(dias) || dias.length !== 7) continue;
+    const impacto = impactoRestricoesLocais(dias, restricoes);
+    const desp = agregarDesperdicioHistorico(desperdicioHistorico);
+    let penalidadeDesperdicio = 0;
+    dias.forEach((dia) => {
+      const d = desp[normalizar(dia.principal)];
+      // Só influencia escolha automática com pelo menos 2 registros; amostra unitária fica apenas visível.
+      if (d && d.n >= 2) penalidadeDesperdicio += d.taxaMedia * 100;
+    });
+    // Restrição humana domina completamente o desempate; desperdício só refina candidatos equivalentes.
+    const peso = impacto.pessoasSomadas * 10000 + impacto.ocorrencias * 1000 + penalidadeDesperdicio;
+    if (peso < melhorPeso) {
+      melhor = dias;
+      melhorPeso = peso;
+    }
+    if (peso === 0) break;
+  }
+  return melhor;
 }
 
 /**
  * Gera três estratégias com o motor existente. A camada não reimplementa o
- * motor: ela apenas compara saídas usando as mesmas fontes de custo/validação.
+ * motor: ela compara saídas usando custo/validação do House e, quando a
+ * Governança entregou evidência oficial, usa a nota agregada do Plus como
+ * fonte prioritária e a contagem real para calibrar apenas baselines intactos.
  */
 export function gerarCenariosGovernanca(
   contexto: ContextoCenariosGovernanca,
 ): CenarioGovernanca[] {
-  const pessoas = contexto.estado.dias.map((dia) => dia.pessoas);
+  const integrado = contextoComInteligenciaOficial(contexto);
+  const ctx = integrado.contexto;
+  const pessoas = ctx.estado.dias.map((dia) => dia.pessoas);
   const opts = {
-    aceitacao: contexto.aceitacao,
-    frequencia: contexto.frequencia,
-    estoque: contexto.estoque ?? {},
+    aceitacao: ctx.aceitacao,
+    frequencia: ctx.frequencia,
+    estoque: ctx.estoque ?? {},
   };
+  const restricoes = ctx.restricoesEquipe ?? {};
+  const desperdicioHistorico = ctx.desperdicioHistorico ?? [];
   const gerados: Array<[ModoCenarioGovernanca, DiaCardapio[] | null]> = [
-    ['historico', sugerirSemanaHistorica(pessoas, contexto.precos, opts)],
-    ['equilibrado', sugerirSemana(pessoas, contexto.precos, opts)],
-    ['criativo', sugerirSemanaCriativa(pessoas, contexto.precos, opts)],
+    ['historico', gerarComMenorImpacto(() => sugerirSemanaHistorica(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
+    ['equilibrado', gerarComMenorImpacto(() => sugerirSemana(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
+    ['criativo', gerarComMenorImpacto(() => sugerirSemanaCriativa(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
   ];
 
   const cenarios = gerados
     .filter((item): item is [ModoCenarioGovernanca, DiaCardapio[]] => Array.isArray(item[1]) && item[1].length === 7)
-    .map(([modo, dias]) => montarCenario(modo, dias, contexto));
+    .map(([modo, dias]) => montarCenario(modo, dias, ctx))
+    .map((cenario) => {
+      const porques = [...cenario.porques];
+      integrado.eventos.mensagens.forEach((m) => porques.unshift(`Evento de demanda: ${m}`));
+      if (integrado.amostraOficial > 0) {
+        porques.unshift(`Aceitação oficial do TATÁ Plus/QR carregada como fonte prioritária (${integrado.amostraOficial} voto(s) no recorte).`);
+      }
+      if (integrado.usouDemanda > 0) {
+        porques.unshift(`Contagem real de refeições calibrou ${integrado.usouDemanda} dia(s) que ainda estavam no baseline automático do House; ajustes manuais do gestor foram preservados.`);
+      }
+      if (integrado.resumo?.diasComDesperdicioRegistrado) {
+        porques.push(`Há desperdício oficial registrado em ${integrado.resumo.diasComDesperdicioRegistrado} dia(s). O dado fica visível como evidência e não vira penalidade inventada sem unidade comparável.`);
+      }
+      if (integrado.resumo?.indiceSaudavelMedio !== null && integrado.resumo?.indiceSaudavelMedio !== undefined) {
+        porques.push(`Índice saudável oficial médio no recorte: ${integrado.resumo.indiceSaudavelMedio.toFixed(0)}/100.`);
+      }
+      return {
+        ...cenario,
+        porques,
+        demanda: {
+          eventosAplicados: integrado.eventos.eventosAplicados,
+          eventosRevisao: integrado.eventos.eventosRevisao,
+          ajustesHumanosPreservados: integrado.eventos.ajustesHumanosPreservados,
+        },
+      };
+    });
 
   const vistos = new Map<string, ModoCenarioGovernanca>();
   return cenarios.map((cenario) => {

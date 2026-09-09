@@ -5,12 +5,17 @@ import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import { CenariosGovernanca } from './CenariosGovernanca';
 import {
+  datasDaSemana,
+  lerDesperdicio,
   lerSemana,
+  semanaVazia,
   semanasComConteudo,
   useAceitacao,
   useAprendizado,
   useEstoque,
+  useEventos,
   useFornecedores,
+  useFuncionarios,
   useHistoricoPrecos,
   useItensExtras,
   useOfertas,
@@ -31,6 +36,13 @@ import {
   instalarHandoffEvidenciaReadOnly,
   type EvidenciaGovernancaReadOnlyV1,
 } from '@/lib/cardapio/governanca-readonly';
+import {
+  instalarHandoffRestricoesGovernanca,
+  itensDaSemanaParaRestricoes,
+  restricoesLocaisAgregadas,
+  solicitarRestricoesGovernanca,
+  type SnapshotRestricoesGovernancaV1,
+} from '@/lib/cardapio/governanca-restricoes';
 
 function novoId(prefixo: string): string {
   try {
@@ -127,6 +139,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [envio, setEnvio] = useState<'ocioso' | 'enviando' | 'confirmado' | 'erro'>('ocioso');
   const [mensagemEnvio, setMensagemEnvio] = useState('');
   const [evidenciaReadOnly, setEvidenciaReadOnly] = useState<EvidenciaGovernancaReadOnlyV1 | null>(null);
+  const [restricoesOficiais, setRestricoesOficiais] = useState<SnapshotRestricoesGovernancaV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
   const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
@@ -137,6 +150,8 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
   const { estoque } = useEstoque();
+  const { eventos } = useEventos();
+  const { funcionarios } = useFuncionarios();
   const { estimativas } = useEstimativas();
   const historico = useHistoricoPrecos();
 
@@ -164,6 +179,11 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
   ), [estoque]);
 
+  const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
+  const baselineAutomatico = useMemo(() => semanaVazia().dias.map((d) => d.pessoas), []);
+  const datasSemana = useMemo(() => datasDaSemana(contexto.semanaId).map((d) => d.toISOString().slice(0, 10)), [contexto.semanaId]);
+  const desperdicioHistorico = semanasComConteudo().flatMap((sid) => lerDesperdicio(sid));
+
   const prontidao = useMemo(
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
     [estado.dias, precos],
@@ -174,6 +194,21 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     semanaEsperada: contexto.semanaId,
     aoEvidencia: setEvidenciaReadOnly,
   }), [contexto.semanaId, contexto.unidadeFonte]);
+
+  useEffect(() => instalarHandoffRestricoesGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setRestricoesOficiais,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+
+  useEffect(() => {
+    const itens = itensDaSemanaParaRestricoes(estado.dias);
+    if (!itens.length) { setRestricoesOficiais(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarRestricoesGovernanca({ unidade: contexto.unidadeFonte, semanaId: contexto.semanaId, itens });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, estado.dias]);
 
   useEffect(() => instalarHandoffPlanejadorGovernanca({
     aoContexto: () => {},
@@ -224,6 +259,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
           alertas={prontidao.alertas}
         />
 
+        {restricoesOficiais && (
+          <section data-testid="restricoes-oficiais-plus" className={`rounded-2xl border px-4 py-3 text-sm ${restricoesOficiais.conflitos.length > 0 ? 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200' : 'border-brand-100 bg-brand-50/70 text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100'}`}>
+            <strong>Restrições oficiais do TATÁ Plus:</strong> {restricoesOficiais.conflitos.length > 0 ? `${restricoesOficiais.conflitos.length} pessoa(s) com conflito na composição atual. Revise antes de aprovar.` : 'nenhum conflito encontrado na composição atual.'}
+          </section>
+        )}
+
         {evidenciaReadOnly && (
           <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
             <strong>Histórico oficial carregado:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Usado somente para analisar esta semana.
@@ -266,6 +307,12 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               aceitacao={aceitacao}
               frequencia={frequenciaRecente}
               estoque={estoqueQuantidade}
+              restricoesEquipe={restricoesEquipe}
+              desperdicioHistorico={desperdicioHistorico}
+              historicoPrecos={historico}
+              baselineAutomatico={baselineAutomatico}
+              eventos={eventos}
+              datasSemana={datasSemana}
             />
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">

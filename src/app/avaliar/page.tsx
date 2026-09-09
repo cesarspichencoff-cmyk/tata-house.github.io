@@ -1,9 +1,11 @@
 'use client';
 
 /* =====================================================================
-   Pesquisa de satisfação do prato do dia (Módulo de feedback / QR).
-   Campo único: qualidade (alimenta o índice de aceitação existente).
-   Envio simples, sem login.
+   Pesquisa de satisfação do prato do dia.
+   - Fluxo real do funcionário/QR: encaminha ao TATÁ Plus /avaliar, que usa
+     identidade do colaborador e o backend oficial tata_refeicoes.
+   - Fluxo local abaixo: preservado somente quando aberto pela Governança,
+     para prova/handoff do contrato sem criar um segundo backend.
    ===================================================================== */
 
 import { useEffect, useState } from 'react';
@@ -24,6 +26,8 @@ import { criarTransportePostMessageGovernanca } from '@/lib/cardapio/governanca-
 import { sincronizarPendenciasGovernanca } from '@/lib/cardapio/governanca-sync';
 
 type Voto = 'bom' | 'ok' | 'ruim';
+
+const PLUS_AVALIAR = 'https://plus.tatasushi.tech/avaliar';
 
 const OPCOES: { v: Voto; emoji: string; rotulo: string }[] = [
   { v: 'bom', emoji: '😋', rotulo: 'Ótimo' },
@@ -91,6 +95,22 @@ export default function PaginaAvaliar() {
   const hoje = new Date();
   const semanaId = idSemanaIso(hoje);
   const diaIdx = (hoje.getDay() + 6) % 7;
+  const [modoGovernanca, setModoGovernanca] = useState(false);
+  const [roteado, setRoteado] = useState(false);
+
+  // QR/abertura comum nunca cria um segundo sistema de votos: entra no mesmo
+  // /avaliar que o funcionário já usa no TATÁ Plus. A tela local permanece
+  // apenas para o handoff browser→browser da Governança (opener/iframe).
+  useEffect(() => {
+    const abertoPelaGovernanca = window.parent !== window || !!window.opener;
+    if (abertoPelaGovernanca) {
+      setModoGovernanca(true);
+      setRoteado(true);
+      return;
+    }
+    setRoteado(true);
+    window.location.replace(PLUS_AVALIAR);
+  }, []);
 
   // Lê o cardápio do dia no cliente (evita mismatch de hidratação).
   const [cardapio, setCardapio] = useState<CardapioDoDia | null>(null);
@@ -101,6 +121,7 @@ export default function PaginaAvaliar() {
   const [comentario, setComentario] = useState('');
 
   useEffect(() => {
+    if (!modoGovernanca) return;
     const atualizar = () => {
       // Se um canal autorizado já entregou o snapshot da Governança, ele ganha
       // precedência. Sem snapshot, o House continua exatamente como antes.
@@ -122,18 +143,17 @@ export default function PaginaAvaliar() {
     const pararChaveExterna = assinarChaveExterna('semana.' + semanaId, atualizar);
     const pararHandoff = instalarHandoffCardapioGovernanca(() => atualizar());
 
-    // Se esta tela foi aberta pela Governança, aproveita o canal autorizado para
-    // tentar escoar pendências antigas. Sem opener/parent, o transporte confirma
-    // zero IDs e a outbox permanece intacta.
+    // Na prova aberta pela Governança, tenta escoar pendências antigas pelo
+    // contrato browser→browser. Isso não é o caminho de voto real do QR.
     void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
-      // A sincronização é secundária; nunca bloqueia o QR nem apaga pendências.
+      // A outbox continua intacta se não houver ACK válido.
     });
 
     return () => {
       pararChaveExterna();
       pararHandoff();
     };
-  }, [semanaId, diaIdx]);
+  }, [semanaId, diaIdx, modoGovernanca]);
 
   const prato = cardapio?.principal;
 
@@ -146,7 +166,7 @@ export default function PaginaAvaliar() {
   const podeSalvar = qualidade !== null;
 
   const enviar = () => {
-    if (!prato || !qualidade) return;
+    if (!modoGovernanca || !prato || !qualidade) return;
     try {
       navigator.vibrate?.(15);
     } catch {
@@ -156,11 +176,10 @@ export default function PaginaAvaliar() {
     const voto = qualidade;
     const textoComentario = comentario;
 
-    // 1) House primeiro: aceitação + termômetro + memória continuam intactos.
+    // Prova local do House: preserva aceitação + termômetro + memória.
     registrarVotoCliente(prato, voto, textoComentario);
 
-    // 2) Contrato da Governança: persistência LOCAL, sem HTTP/Supabase.
-    // Um transporte confirma IDs individualmente e só então limpa a fila.
+    // Contrato da Governança: persistência LOCAL, sem HTTP/Supabase.
     const pendente = registrarAvaliacaoGovernancaPendente({
       data: new Date(),
       prato,
@@ -169,8 +188,6 @@ export default function PaginaAvaliar() {
       unidade: unidadeFonteGovernancaLocal(new Date()) ?? undefined,
     });
 
-    // 3) Prova browser→browser: somente quando existe uma janela da Governança.
-    // Ausência/falha do canal não muda a experiência nem perde o voto local.
     if (pendente) {
       void sincronizarPendenciasGovernanca(criarTransportePostMessageGovernanca()).catch(() => {
         // A outbox continua sendo a fonte da pendência até um ACK válido chegar.
@@ -182,11 +199,25 @@ export default function PaginaAvaliar() {
     setComentario('');
   };
 
+  if (!roteado || !modoGovernanca) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-brand-800 via-brand-700 to-brand-900 px-6 text-center text-white">
+        <div>
+          <div className="font-display text-xl font-bold">Abrindo TATÁ Plus…</div>
+          <p className="mt-2 text-sm text-brand-100">Sua avaliação será registrada no módulo oficial dos funcionários.</p>
+          <a className="mt-5 inline-block rounded-2xl bg-white/15 px-5 py-3 text-sm font-bold ring-1 ring-white/20" href={PLUS_AVALIAR}>
+            Continuar para avaliação
+          </a>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-gradient-to-b from-brand-800 via-brand-700 to-brand-900 px-6 py-10 text-center text-white">
       <div className="space-y-1">
         <div className="font-display text-sm font-bold uppercase tracking-[0.4em] text-brand-200">Tatá House</div>
-        <div className="text-caption font-extrabold uppercase tracking-[0.3em] text-ouro-300">Diga como foi o almoço</div>
+        <div className="text-caption font-extrabold uppercase tracking-[0.3em] text-ouro-300">Prova Governança × House</div>
       </div>
 
       {!pronto ? (
@@ -207,18 +238,15 @@ export default function PaginaAvaliar() {
             })}
           </div>
           <span className="animate-estourar text-7xl">😊</span>
-          <p className="font-display text-2xl font-bold">Obrigado pelo feedback!</p>
-          <p className="text-sm text-brand-100">Sua opinião ajuda a melhorar o cardápio. 💚</p>
+          <p className="font-display text-2xl font-bold">Feedback confirmado na prova local</p>
         </div>
       ) : !prato ? (
         <div className="space-y-2">
           <span className="text-6xl">🍽️</span>
           <p className="font-display text-2xl font-bold">Cardápio de hoje a definir</p>
-          <p className="text-sm text-brand-100">Volte na hora do almoço para avaliar o prato do dia.</p>
         </div>
       ) : (
         <div className="w-full max-w-md space-y-6">
-          {/* Cabeçalho do prato */}
           <div className="space-y-1">
             <p className="text-caption font-extrabold uppercase tracking-[0.25em] text-brand-200">
               {DIAS_SEMANA[diaIdx]} · prato do dia
@@ -231,15 +259,10 @@ export default function PaginaAvaliar() {
             )}
           </div>
 
-          {/* Avaliação única + comentário */}
           <div className="space-y-5 rounded-3xl bg-white/10 p-5 ring-1 ring-white/20 text-left">
             <SecaoAvaliacao titulo="Como está o prato de hoje?" valor={qualidade} onChange={setQualidade} />
-
-            {/* Comentário livre */}
             <div className="space-y-2">
-              <p className="text-rotulo font-extrabold uppercase tracking-[0.2em] text-brand-200">
-                💬 Comentário livre
-              </p>
+              <p className="text-rotulo font-extrabold uppercase tracking-[0.2em] text-brand-200">💬 Comentário livre</p>
               <textarea
                 value={comentario}
                 onChange={(e) => setComentario(e.target.value)}
@@ -259,7 +282,7 @@ export default function PaginaAvaliar() {
                 : 'cursor-not-allowed bg-white/10 text-white/40'
             }`}
           >
-            Enviar avaliação
+            Registrar na prova local
           </button>
         </div>
       )}
