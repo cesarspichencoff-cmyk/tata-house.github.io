@@ -1,80 +1,51 @@
-name: Verify House Cohesion Pass Temp
+name: Verify House Cohesion Materialized Temp
 
 on:
   push:
     branches:
       - verify/house-cohesion-pass-20260909
 
-permissions:
-  contents: write
-
 jobs:
-  cohesion:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout harness
-        uses: actions/checkout@v4
-        with:
-          ref: verify/house-cohesion-pass-20260909
-          path: harness
-          fetch-depth: 1
-      - name: Checkout candidate
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feat/house-intelligence-v2-cohesion
-          path: work
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: work/package-lock.json
-      - name: Anchor and transform
+      - name: Anchor exact materialized candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "3f3708b858a436bcc6d1da1d8e75d07522b3a1ca"
+          test "$(git rev-parse HEAD^)" = "dc6bb54a22bf89f671aaaf1a91ce340cb406bf4a"
+      - name: Exact production delta
         shell: bash
         run: |
-          cd work
-          test "$(git rev-parse HEAD)" = "dc6bb54a22bf89f671aaaf1a91ce340cb406bf4a"
-          python ../harness/tools/house_cohesion_pass_temp.py
-          if grep -R --exclude-dir=.git --exclude-dir=node_modules -n "ContadorRefeicoes" src; then
-            echo "referência ao contador legado permaneceu" >&2
-            exit 1
-          fi
-          git diff --check
-      - name: Install
-        working-directory: work
-        run: npm ci
-      - name: Typecheck
-        working-directory: work
-        run: npm run typecheck
-      - name: Lint
-        working-directory: work
-        run: npm run lint
-      - name: Tests
-        working-directory: work
-        run: npm test
-      - name: Build
-        working-directory: work
-        run: npm run build
-      - name: Scope receipt
-        shell: bash
-        run: |
-          cd work
-          git add -N .
-          git diff --name-only dc6bb54a22bf89f671aaaf1a91ce340cb406bf4a -- > /tmp/files
+          git diff --check 7f77fc88a12b11d40a185230f50d34172528082e...HEAD
+          git diff --name-only 7f77fc88a12b11d40a185230f50d34172528082e...HEAD > /tmp/files
           cat /tmp/files
-          grep -qx 'src/lib/cardapio/estado.tsx' /tmp/files
-          grep -qx 'src/components/cardapio/PlanejadorGovernanca.tsx' /tmp/files
+          test "$(wc -l < /tmp/files | tr -d ' ')" = "14"
+          ! grep -E '^\.github/|^tools/' /tmp/files
           grep -qx 'src/components/cardapio/ContadorRefeicoes.tsx' /tmp/files
           grep -qx 'src/lib/cardapio/governanca-estoque-oficial.ts' /tmp/files
           grep -qx 'src/lib/cardapio/governanca-estoque-oficial.test.ts' /tmp/files
-          test "$(wc -l < /tmp/files | tr -d ' ')" = "5"
-          echo 'HOUSE_COHESION_SCOPE=PASS'
-      - name: Materialize tested candidate
-        shell: bash
+          test ! -e src/components/cardapio/ContadorRefeicoes.tsx
+          echo 'HOUSE_COHESION_MATERIALIZED_SCOPE=PASS'
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Final receipt
         run: |
-          cd work
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat(house): fechar coesão de DNA, refeições e estoque oficial"
-          git push origin HEAD:feat/house-intelligence-v2-cohesion
+          echo 'HOUSE_COHESION_MATERIALIZED=PASS'
+          echo 'HOUSE_HEAD=3f3708b858a436bcc6d1da1d8e75d07522b3a1ca'
+          echo 'PRODUCTION_BASE=7f77fc88a12b11d40a185230f50d34172528082e'
