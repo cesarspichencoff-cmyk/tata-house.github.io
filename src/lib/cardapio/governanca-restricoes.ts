@@ -145,7 +145,16 @@ export function solicitarRestricoesGovernanca(opcoes: { unidade: string; semanaI
   if (typeof window === 'undefined') return false;
   const unidade = texto(opcoes.unidade, 80);
   const semanaId = texto(opcoes.semanaId, 16);
-  const itens = Array.from(new Map(opcoes.itens.map((i) => [normalizar(i), texto(i, 120)]).filter(([k, v]) => !!k && !!v)).values()).slice(0, MAX_ITENS);
+  const vistos = new Set<string>();
+  const itens: string[] = [];
+  for (const bruto of opcoes.itens) {
+    const item = texto(bruto, 120);
+    const chave = normalizar(item);
+    if (!item || !chave || vistos.has(chave)) continue;
+    vistos.add(chave);
+    itens.push(item);
+    if (itens.length >= MAX_ITENS) break;
+  }
   if (!unidade || !semanaValida(semanaId) || itens.length === 0) return false;
   const msg = { type: GOV_RESTRICOES_REQUEST_V1, versao: 1, unidade, semanaId, itens };
   let enviado = false;

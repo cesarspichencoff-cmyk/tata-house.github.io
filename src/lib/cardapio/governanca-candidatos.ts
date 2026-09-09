@@ -15,6 +15,7 @@ import {
   evidenciaGovernancaAtual,
   resumoOperacionalOficial,
 } from './governanca-readonly';
+import { impactoRestricoesLocais } from './governanca-restricoes';
 import type { DiaCardapio, EstadoSemana } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
@@ -31,6 +32,8 @@ export interface MetricasCenarioGovernanca {
   votosAceitacao: number;
   pratosRecentes: number;
   ocorrenciasRecentes: number;
+  ocorrenciasRestricao: number;
+  pessoasRestricaoSomadas: number;
   nutricaoMedia: number;
   proteinasDistintas: number;
   erros: number;
@@ -59,6 +62,7 @@ export interface ContextoCenariosGovernanca {
   aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
   estoque?: Record<string, number>;
+  restricoesEquipe?: Record<string, number>;
 }
 
 const META: Record<ModoCenarioGovernanca, { titulo: string; selo: string; descricao: string }> = {
@@ -123,6 +127,7 @@ export function analisarCenarioGovernanca(args: {
   mostrarBasicos?: boolean;
   aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
+  restricoesEquipe?: Record<string, number>;
 }): MetricasCenarioGovernanca {
   const estadoCandidato = aplicarCenarioAoEstado(args.estadoBase, args.dias);
   const custo = custoDaSemana(
@@ -168,6 +173,7 @@ export function analisarCenarioGovernanca(args: {
     ? Math.max(0, Math.min(1, 1 - custo.itensSemPreco / custo.itens))
     : 0;
   const coberturaDadosPct = Math.round(((coberturaAceitacao + coberturaPreco) / 2) * 100);
+  const impactoRestricoes = impactoRestricoesLocais(args.dias, args.restricoesEquipe ?? {});
 
   return {
     custoTotal: custo.total,
@@ -180,6 +186,8 @@ export function analisarCenarioGovernanca(args: {
     votosAceitacao,
     pratosRecentes,
     ocorrenciasRecentes,
+    ocorrenciasRestricao: impactoRestricoes.ocorrencias,
+    pessoasRestricaoSomadas: impactoRestricoes.pessoasSomadas,
     nutricaoMedia: Math.round(nutricaoMedia),
     proteinasDistintas: proteinas.size,
     erros: avisos.filter((a) => a.nivel === 'erro').length,
@@ -204,6 +212,8 @@ function construirPorques(
   }
   if (m.pratosRecentes > 0) itens.push(`${m.pratosRecentes}/7 principais apareceram nas semanas recentes (${m.ocorrenciasRecentes} ocorrência(s) somadas).`);
   else itens.push('Nenhum principal deste cenário aparece no recorte recente carregado.');
+  if (m.ocorrenciasRestricao > 0) itens.push(`O cadastro de funcionários do House detectou ${m.ocorrenciasRestricao} conflito(s) de restrição (${m.pessoasRestricaoSomadas} impacto(s) pessoa-dia). O cenário exige correção antes da decisão.`);
+  else itens.push('Nenhum conflito foi encontrado nas restrições cadastradas no módulo de funcionários do House.');
   if (m.itensSemPreco > 0) itens.push(`${m.itensSemPreco} item(ns) continuam sem preço; custo deve ser tratado como incompleto.`);
   else if (m.itensEstimados > 0) itens.push(`Custo usa ${m.itensEstimados} preço(s) estimado(s); a tela distingue estimativa de preço real.`);
   else if (m.custoPorRefeicao !== null) itens.push('O custo foi calculado pela fonte única oficial da semana, sem uma calculadora paralela.');
@@ -226,6 +236,7 @@ function montarCenario(
     mostrarBasicos: contexto.mostrarBasicos,
     aceitacao: contexto.aceitacao,
     frequencia: contexto.frequencia,
+    restricoesEquipe: contexto.restricoesEquipe,
   });
   return {
     id: modo,
@@ -266,6 +277,23 @@ function contextoComInteligenciaOficial(
   };
 }
 
+function gerarComMenorImpacto(gerador: () => DiaCardapio[] | null, restricoes: Record<string, number>): DiaCardapio[] | null {
+  let melhor: DiaCardapio[] | null = null;
+  let melhorPeso = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 4; i += 1) {
+    const dias = gerador();
+    if (!Array.isArray(dias) || dias.length !== 7) continue;
+    const impacto = impactoRestricoesLocais(dias, restricoes);
+    const peso = impacto.pessoasSomadas * 100 + impacto.ocorrencias;
+    if (peso < melhorPeso) {
+      melhor = dias;
+      melhorPeso = peso;
+    }
+    if (peso === 0) break;
+  }
+  return melhor;
+}
+
 /**
  * Gera três estratégias com o motor existente. A camada não reimplementa o
  * motor: ela compara saídas usando custo/validação do House e, quando a
@@ -283,10 +311,11 @@ export function gerarCenariosGovernanca(
     frequencia: ctx.frequencia,
     estoque: ctx.estoque ?? {},
   };
+  const restricoes = ctx.restricoesEquipe ?? {};
   const gerados: Array<[ModoCenarioGovernanca, DiaCardapio[] | null]> = [
-    ['historico', sugerirSemanaHistorica(pessoas, ctx.precos, opts)],
-    ['equilibrado', sugerirSemana(pessoas, ctx.precos, opts)],
-    ['criativo', sugerirSemanaCriativa(pessoas, ctx.precos, opts)],
+    ['historico', gerarComMenorImpacto(() => sugerirSemanaHistorica(pessoas, ctx.precos, opts), restricoes)],
+    ['equilibrado', gerarComMenorImpacto(() => sugerirSemana(pessoas, ctx.precos, opts), restricoes)],
+    ['criativo', gerarComMenorImpacto(() => sugerirSemanaCriativa(pessoas, ctx.precos, opts), restricoes)],
   ];
 
   const cenarios = gerados
