@@ -7,7 +7,7 @@ import {
   gerarCenariosGovernanca,
   type CenarioGovernanca,
 } from '@/lib/cardapio/governanca-candidatos';
-import type { Aceitacao, EstadoSemana } from '@/lib/cardapio/tipos';
+import type { Aceitacao, EstadoSemana, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -73,6 +73,11 @@ function CardCenario({
           hint={m.ocorrenciasRestricao > 0 ? `${m.pessoasRestricaoSomadas} impacto(s) pessoa-dia` : 'módulo de funcionários do House'}
         />
         <Metric
+          label="Desperdício"
+          value={m.desperdicioMedioPct === null ? 'Sem amostra' : `${m.desperdicioMedioPct}%`}
+          hint={m.desperdicioMedioPct === null ? 'histórico House ainda insuficiente' : `${m.pratosComDesperdicio}/7 principais · ${m.amostraDesperdicio} registro(s)`}
+        />
+        <Metric
           label="Repetição recente"
           value={`${m.pratosRecentes}/7`}
           hint={`${m.ocorrenciasRecentes} ocorrência(s) no recorte`}
@@ -128,6 +133,7 @@ export function CenariosGovernanca({
   frequencia,
   estoque,
   restricoesEquipe,
+  desperdicioHistorico,
 }: {
   estado: EstadoSemana;
   atualizar: (fn: (estado: EstadoSemana) => EstadoSemana) => void;
@@ -139,6 +145,7 @@ export function CenariosGovernanca({
   frequencia: Record<string, number>;
   estoque: Record<string, number>;
   restricoesEquipe: Record<string, number>;
+  desperdicioHistorico: RegistroDesperdicio[];
 }) {
   const [cenarios, setCenarios] = useState<CenarioGovernanca[]>([]);
   const [aplicado, setAplicado] = useState<string | null>(null);
@@ -155,6 +162,7 @@ export function CenariosGovernanca({
       frequencia,
       estoque,
       restricoesEquipe,
+      desperdicioHistorico,
     });
     setCenarios(novos);
     setAplicado(null);
@@ -190,7 +198,7 @@ export function CenariosGovernanca({
           <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Compare antes de montar</p>
           <h2 className="mt-1 font-display text-xl font-bold tracking-tight">Compare 3 estratégias para a mesma semana</h2>
           <p className="mt-2 text-sm leading-6 text-texto-suave">
-            Compare propostas com custo, restrições, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
+            Compare propostas com custo, restrições, desperdício, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
           </p>
         </div>
         <button

@@ -16,7 +16,7 @@ import {
   resumoOperacionalOficial,
 } from './governanca-readonly';
 import { impactoRestricoesLocais } from './governanca-restricoes';
-import type { DiaCardapio, EstadoSemana } from './tipos';
+import type { DiaCardapio, EstadoSemana, RegistroDesperdicio } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
 export type AceitacaoPlanejamento = Record<string, { n: number; somaNotas: number }>;
@@ -34,6 +34,9 @@ export interface MetricasCenarioGovernanca {
   ocorrenciasRecentes: number;
   ocorrenciasRestricao: number;
   pessoasRestricaoSomadas: number;
+  desperdicioMedioPct: number | null;
+  pratosComDesperdicio: number;
+  amostraDesperdicio: number;
   nutricaoMedia: number;
   proteinasDistintas: number;
   erros: number;
@@ -63,6 +66,7 @@ export interface ContextoCenariosGovernanca {
   frequencia: Record<string, number>;
   estoque?: Record<string, number>;
   restricoesEquipe?: Record<string, number>;
+  desperdicioHistorico?: RegistroDesperdicio[];
 }
 
 const META: Record<ModoCenarioGovernanca, { titulo: string; selo: string; descricao: string }> = {
@@ -110,6 +114,25 @@ export function aplicarCenarioAoEstado(
   };
 }
 
+export interface DesperdicioPratoPlanejamento { taxaMedia: number; n: number; }
+
+/** Taxa adimensional por prato. Cada registro é normalizado dentro da própria unidade
+ * (kg ou porções), portanto nunca somamos quantidades incompatíveis. */
+export function agregarDesperdicioHistorico(registros: RegistroDesperdicio[]): Record<string, DesperdicioPratoPlanejamento> {
+  const acc: Record<string, { soma: number; n: number }> = {};
+  registros.forEach((r) => {
+    if (!(r.produzido > 0) || !Number.isFinite(r.consumido)) return;
+    const chave = normalizar(r.prato);
+    if (!chave) return;
+    const taxa = Math.max(0, Math.min(1, (r.produzido - r.consumido) / r.produzido));
+    const atual = acc[chave] ?? { soma: 0, n: 0 };
+    atual.soma += taxa;
+    atual.n += 1;
+    acc[chave] = atual;
+  });
+  return Object.fromEntries(Object.entries(acc).map(([chave, v]) => [chave, { taxaMedia: v.soma / v.n, n: v.n }]));
+}
+
 function fingerprintDias(dias: DiaCardapio[]): string {
   return dias
     .map((dia) => [dia.principal, dia.guarnicaoFixa, dia.guarnicao, dia.salada, dia.sobremesa]
@@ -128,6 +151,7 @@ export function analisarCenarioGovernanca(args: {
   aceitacao: AceitacaoPlanejamento;
   frequencia: Record<string, number>;
   restricoesEquipe?: Record<string, number>;
+  desperdicioHistorico?: RegistroDesperdicio[];
 }): MetricasCenarioGovernanca {
   const estadoCandidato = aplicarCenarioAoEstado(args.estadoBase, args.dias);
   const custo = custoDaSemana(
@@ -174,6 +198,20 @@ export function analisarCenarioGovernanca(args: {
     : 0;
   const coberturaDadosPct = Math.round(((coberturaAceitacao + coberturaPreco) / 2) * 100);
   const impactoRestricoes = impactoRestricoesLocais(args.dias, args.restricoesEquipe ?? {});
+  const desperdicio = agregarDesperdicioHistorico(args.desperdicioHistorico ?? []);
+  let somaTaxasDesperdicio = 0;
+  let amostraDesperdicio = 0;
+  let pratosComDesperdicio = 0;
+  args.dias.forEach((dia) => {
+    const d = desperdicio[normalizar(dia.principal)];
+    if (!d || d.n <= 0) return;
+    somaTaxasDesperdicio += d.taxaMedia * d.n;
+    amostraDesperdicio += d.n;
+    pratosComDesperdicio += 1;
+  });
+  const desperdicioMedioPct = amostraDesperdicio > 0
+    ? Math.round((somaTaxasDesperdicio / amostraDesperdicio) * 100)
+    : null;
 
   return {
     custoTotal: custo.total,
@@ -188,6 +226,9 @@ export function analisarCenarioGovernanca(args: {
     ocorrenciasRecentes,
     ocorrenciasRestricao: impactoRestricoes.ocorrencias,
     pessoasRestricaoSomadas: impactoRestricoes.pessoasSomadas,
+    desperdicioMedioPct,
+    pratosComDesperdicio,
+    amostraDesperdicio,
     nutricaoMedia: Math.round(nutricaoMedia),
     proteinasDistintas: proteinas.size,
     erros: avisos.filter((a) => a.nivel === 'erro').length,
@@ -214,6 +255,8 @@ function construirPorques(
   else itens.push('Nenhum principal deste cenário aparece no recorte recente carregado.');
   if (m.ocorrenciasRestricao > 0) itens.push(`O cadastro de funcionários do House detectou ${m.ocorrenciasRestricao} conflito(s) de restrição (${m.pessoasRestricaoSomadas} impacto(s) pessoa-dia). O cenário exige correção antes da decisão.`);
   else itens.push('Nenhum conflito foi encontrado nas restrições cadastradas no módulo de funcionários do House.');
+  if (m.desperdicioMedioPct !== null) itens.push(`Histórico House dos principais deste cenário: desperdício médio ${m.desperdicioMedioPct}% em ${m.amostraDesperdicio} registro(s), cobrindo ${m.pratosComDesperdicio}/7 prato(s). A taxa é normalizada dentro de cada registro; kg e porções nunca são somados.`);
+  else itens.push('Ainda não há amostra de desperdício House para os principais deste cenário; o sistema não inventa penalidade.');
   if (m.itensSemPreco > 0) itens.push(`${m.itensSemPreco} item(ns) continuam sem preço; custo deve ser tratado como incompleto.`);
   else if (m.itensEstimados > 0) itens.push(`Custo usa ${m.itensEstimados} preço(s) estimado(s); a tela distingue estimativa de preço real.`);
   else if (m.custoPorRefeicao !== null) itens.push('O custo foi calculado pela fonte única oficial da semana, sem uma calculadora paralela.');
@@ -237,6 +280,7 @@ function montarCenario(
     aceitacao: contexto.aceitacao,
     frequencia: contexto.frequencia,
     restricoesEquipe: contexto.restricoesEquipe,
+    desperdicioHistorico: contexto.desperdicioHistorico,
   });
   return {
     id: modo,
@@ -277,14 +321,26 @@ function contextoComInteligenciaOficial(
   };
 }
 
-function gerarComMenorImpacto(gerador: () => DiaCardapio[] | null, restricoes: Record<string, number>): DiaCardapio[] | null {
+function gerarComMenorImpacto(
+  gerador: () => DiaCardapio[] | null,
+  restricoes: Record<string, number>,
+  desperdicioHistorico: RegistroDesperdicio[],
+): DiaCardapio[] | null {
   let melhor: DiaCardapio[] | null = null;
   let melhorPeso = Number.POSITIVE_INFINITY;
   for (let i = 0; i < 4; i += 1) {
     const dias = gerador();
     if (!Array.isArray(dias) || dias.length !== 7) continue;
     const impacto = impactoRestricoesLocais(dias, restricoes);
-    const peso = impacto.pessoasSomadas * 100 + impacto.ocorrencias;
+    const desp = agregarDesperdicioHistorico(desperdicioHistorico);
+    let penalidadeDesperdicio = 0;
+    dias.forEach((dia) => {
+      const d = desp[normalizar(dia.principal)];
+      // Só influencia escolha automática com pelo menos 2 registros; amostra unitária fica apenas visível.
+      if (d && d.n >= 2) penalidadeDesperdicio += d.taxaMedia * 100;
+    });
+    // Restrição humana domina completamente o desempate; desperdício só refina candidatos equivalentes.
+    const peso = impacto.pessoasSomadas * 10000 + impacto.ocorrencias * 1000 + penalidadeDesperdicio;
     if (peso < melhorPeso) {
       melhor = dias;
       melhorPeso = peso;
@@ -312,10 +368,11 @@ export function gerarCenariosGovernanca(
     estoque: ctx.estoque ?? {},
   };
   const restricoes = ctx.restricoesEquipe ?? {};
+  const desperdicioHistorico = ctx.desperdicioHistorico ?? [];
   const gerados: Array<[ModoCenarioGovernanca, DiaCardapio[] | null]> = [
-    ['historico', gerarComMenorImpacto(() => sugerirSemanaHistorica(pessoas, ctx.precos, opts), restricoes)],
-    ['equilibrado', gerarComMenorImpacto(() => sugerirSemana(pessoas, ctx.precos, opts), restricoes)],
-    ['criativo', gerarComMenorImpacto(() => sugerirSemanaCriativa(pessoas, ctx.precos, opts), restricoes)],
+    ['historico', gerarComMenorImpacto(() => sugerirSemanaHistorica(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
+    ['equilibrado', gerarComMenorImpacto(() => sugerirSemana(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
+    ['criativo', gerarComMenorImpacto(() => sugerirSemanaCriativa(pessoas, ctx.precos, opts), restricoes, desperdicioHistorico)],
   ];
 
   const cenarios = gerados

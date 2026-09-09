@@ -5,6 +5,7 @@ import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import { CenariosGovernanca } from './CenariosGovernanca';
 import {
+  lerDesperdicio,
   lerSemana,
   semanasComConteudo,
   useAceitacao,
@@ -175,6 +176,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   ), [estoque]);
 
   const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
+  const desperdicioHistorico = semanasComConteudo().flatMap((sid) => lerDesperdicio(sid));
 
   const prontidao = useMemo(
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
@@ -300,6 +302,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               frequencia={frequenciaRecente}
               estoque={estoqueQuantidade}
               restricoesEquipe={restricoesEquipe}
+              desperdicioHistorico={desperdicioHistorico}
             />
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">

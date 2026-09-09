@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { normalizar } from './motor';
 import {
+  agregarDesperdicioHistorico,
   analisarCenarioGovernanca,
   aplicarCenarioAoEstado,
   gerarCenariosGovernanca,
 } from './governanca-candidatos';
-import type { Aceitacao, DiaCardapio, EstadoSemana } from './tipos';
+import type { Aceitacao, DiaCardapio, EstadoSemana, RegistroDesperdicio } from './tipos';
 
 function diasFixture(): DiaCardapio[] {
   const principais = [
@@ -63,7 +64,19 @@ const restricoesEquipe = {
   [normalizar('Lombo suíno')]: 1,
 };
 
+const desperdicioHistorico: RegistroDesperdicio[] = [
+  { id: 'd1', dia: 0, prato: 'Frango grelhado', produzido: 10, consumido: 8, unid: 'porções', em: '2026-08-01T00:00:00Z' },
+  { id: 'd2', dia: 0, prato: 'Frango grelhado', produzido: 5, consumido: 4, unid: 'kg', em: '2026-08-08T00:00:00Z' },
+  { id: 'd3', dia: 1, prato: 'Bife acebolado', produzido: 100, consumido: 95, unid: 'porções', em: '2026-08-09T00:00:00Z' },
+];
+
 describe('governanca-candidatos', () => {
+  it('normaliza desperdício por registro sem somar kg com porções', () => {
+    const mapa = agregarDesperdicioHistorico(desperdicioHistorico);
+    expect(mapa[normalizar('Frango grelhado')].n).toBe(2);
+    expect(mapa[normalizar('Frango grelhado')].taxaMedia).toBeCloseTo(0.2, 6);
+    expect(mapa[normalizar('Bife acebolado')].taxaMedia).toBeCloseTo(0.05, 6);
+  });
   it('analisa evidência sem inventar aceitação, conta repetição e mede impacto de restrições', () => {
     const dias = diasFixture();
     const metricas = analisarCenarioGovernanca({
@@ -76,6 +89,7 @@ describe('governanca-candidatos', () => {
         [normalizar('Frango assado')]: 2,
       },
       restricoesEquipe,
+      desperdicioHistorico,
     });
 
     expect(metricas.pratosComAceitacao).toBe(2); // n=1 não entra como evidência mínima
@@ -85,6 +99,9 @@ describe('governanca-candidatos', () => {
     expect(metricas.ocorrenciasRecentes).toBe(3);
     expect(metricas.ocorrenciasRestricao).toBe(2);
     expect(metricas.pessoasRestricaoSomadas).toBe(3);
+    expect(metricas.desperdicioMedioPct).toBe(15);
+    expect(metricas.pratosComDesperdicio).toBe(2);
+    expect(metricas.amostraDesperdicio).toBe(3);
     expect(metricas.proteinasDistintas).toBe(4);
     expect(metricas.nutricaoMedia).toBeGreaterThanOrEqual(20);
     expect(metricas.nutricaoMedia).toBeLessThanOrEqual(100);
@@ -124,6 +141,7 @@ describe('governanca-candidatos', () => {
       frequencia: {},
       estoque: {},
       restricoesEquipe,
+      desperdicioHistorico,
     });
 
     expect(cenarios.length).toBe(3);
@@ -136,6 +154,7 @@ describe('governanca-candidatos', () => {
       expect(cenario.metricas.ocorrenciasRestricao).toBeGreaterThanOrEqual(0);
       expect(cenario.metricas.pessoasRestricaoSomadas).toBeGreaterThanOrEqual(0);
       expect(cenario.porques.some((p) => /restri/i.test(p))).toBe(true);
+      expect(cenario.porques.some((p) => /desperd[ií]cio/i.test(p))).toBe(true);
       expect(cenario.fingerprint.length).toBeGreaterThan(20);
     }
   });
