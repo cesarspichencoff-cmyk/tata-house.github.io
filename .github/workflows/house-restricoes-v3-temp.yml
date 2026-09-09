@@ -1,4 +1,4 @@
-name: House Restricoes V3 Temp
+name: House Intelligence Final Temp
 
 on:
   push:
@@ -20,10 +20,8 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: npm
-      - name: Apply deterministic patch
-        run: |
-          node .github/scripts/fix-governanca-restricoes-type-v1.mjs
-          node .github/scripts/apply-house-restricoes-v3.mjs
+      - name: Apply waste intelligence patch once
+        run: node .github/scripts/apply-house-waste-intelligence-v1.mjs
       - name: Diff check
         run: git diff --check
       - run: npm ci
@@ -47,9 +45,11 @@ jobs:
           grep -Fq "sugerirSemanaHistorica" src/lib/cardapio/governanca-candidatos.ts
           grep -Fq "sugerirSemanaCriativa" src/lib/cardapio/governanca-candidatos.ts
           grep -Fq "sugerirSemana(" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "Desperdício" src/components/cardapio/CenariosGovernanca.tsx
           echo "HOUSE_AUTO_GENERATOR_PRESERVED=PASS"
           echo "HOUSE_QR_PRINT_PRESERVED=PASS"
-      - name: Commit verified patch
+          echo "HOUSE_WASTE_VISIBLE=PASS"
+      - name: Commit verified product patch
         run: |
           if git diff --quiet; then
             echo "NO_PATCH_DIFF=PASS"
@@ -57,6 +57,10 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/cardapio/governanca-restricoes.ts src/lib/cardapio/governanca-candidatos.ts src/components/cardapio/PlanejadorGovernanca.tsx
-          git commit -m "feat(house): usar restricoes na inteligencia e validar com Plus"
+          git add \
+            src/lib/cardapio/governanca-candidatos.ts \
+            src/lib/cardapio/governanca-candidatos.test.ts \
+            src/components/cardapio/CenariosGovernanca.tsx \
+            src/components/cardapio/PlanejadorGovernanca.tsx
+          git commit -m "feat(house): usar desperdicio real na inteligencia de cardapio"
           git push
