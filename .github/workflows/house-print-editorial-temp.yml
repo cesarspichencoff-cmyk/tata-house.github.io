@@ -1,0 +1,58 @@
+name: House Print Editorial Temp
+
+on:
+  push:
+    branches:
+      - feat/house-plus-intelligence-v2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Apply editorial print patch
+        run: node .github/scripts/apply-house-print-editorial-v1.mjs
+      - name: Diff safety
+        run: |
+          git diff --check
+          changed=$(git diff --name-only)
+          test "$changed" = "src/components/cardapio/PosterSemana.tsx" || { echo "$changed"; exit 1; }
+          echo "HOUSE_PRINT_SCOPE_ONLY_POSTER=PASS"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Print contract
+        run: |
+          grep -Fq "QRCode.toDataURL" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "window.print()" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "Cardápio da semana" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "Semana · {periodo}" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "borderLeftColor: COR_PROTEINA[prot]" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "Média do prato montado (~500 g)" src/components/cardapio/PosterSemana.tsx
+          ! grep -Fq "Legenda de proteínas" src/components/cardapio/PosterSemana.tsx
+          echo "HOUSE_PRINT_QR_PRESERVED=PASS"
+          echo "HOUSE_PRINT_BROWSER_PRINT_PRESERVED=PASS"
+          echo "HOUSE_PRINT_EDITORIAL_HIERARCHY=PASS"
+      - name: Commit verified product patch
+        run: |
+          if git diff --quiet; then
+            echo "HOUSE_PRINT_ALREADY_MATERIALIZED=PASS"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cardapio/PosterSemana.tsx
+          git commit -m "feat(house): refinar cardápio impresso com direção editorial"
+          git push
