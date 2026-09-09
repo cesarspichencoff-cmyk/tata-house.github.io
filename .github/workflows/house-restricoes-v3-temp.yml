@@ -31,6 +31,24 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Preserve House generator and print system
+        run: |
+          git diff --quiet 7f77fc88a12b11d40a185230f50d34172528082e -- \
+            src/lib/cardapio/motor.ts \
+            src/components/cardapio/PlaquinhaQR.tsx \
+            src/components/cardapio/PosterSemana.tsx \
+            src/components/QrCode.tsx \
+            src/components/cardapio/AbaAceitacao.tsx
+          grep -Fq "QRCode.toDataURL" src/components/cardapio/PlaquinhaQR.tsx
+          grep -Fq "window.print()" src/components/cardapio/PlaquinhaQR.tsx
+          grep -Fq "QRCode.toDataURL" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "window.print()" src/components/cardapio/PosterSemana.tsx
+          grep -Fq "<PlaquinhaQR" src/components/cardapio/AbaAceitacao.tsx
+          grep -Fq "sugerirSemanaHistorica" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "sugerirSemanaCriativa" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "sugerirSemana(" src/lib/cardapio/governanca-candidatos.ts
+          echo "HOUSE_AUTO_GENERATOR_PRESERVED=PASS"
+          echo "HOUSE_QR_PRINT_PRESERVED=PASS"
       - name: Commit verified patch
         run: |
           if git diff --quiet; then
