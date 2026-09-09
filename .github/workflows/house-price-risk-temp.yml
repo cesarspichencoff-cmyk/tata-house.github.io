@@ -1,0 +1,61 @@
+name: House Price Risk Temp
+
+on:
+  push:
+    branches:
+      - feat/house-plus-intelligence-v2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Apply price risk patch
+        run: node .github/scripts/apply-house-price-risk-v1.mjs
+      - name: Diff safety
+        run: |
+          git diff --check
+          changed=$(git diff --name-only | sort)
+          expected=$(printf '%s\n' \
+            src/components/cardapio/CenariosGovernanca.tsx \
+            src/components/cardapio/PlanejadorGovernanca.tsx \
+            src/lib/cardapio/governanca-candidatos.test.ts \
+            src/lib/cardapio/governanca-candidatos.ts | sort)
+          test "$changed" = "$expected" || { echo "$changed"; exit 1; }
+          echo "HOUSE_PRICE_RISK_SCOPE=PASS"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Price risk contract
+        run: |
+          grep -Fq "analisarRadar" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "listaDoDia" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "não é penalizada duas vezes" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq 'label="Preço em alta"' src/components/cardapio/CenariosGovernanca.tsx
+          grep -Fq "custoTotal).toBe(semRadar.custoTotal" src/lib/cardapio/governanca-candidatos.test.ts
+          echo "HOUSE_PRICE_RISK_REUSES_RADAR=PASS"
+          echo "HOUSE_PRICE_RISK_NO_DOUBLE_PENALTY=PASS"
+      - name: Commit verified product patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            src/components/cardapio/CenariosGovernanca.tsx \
+            src/components/cardapio/PlanejadorGovernanca.tsx \
+            src/lib/cardapio/governanca-candidatos.test.ts \
+            src/lib/cardapio/governanca-candidatos.ts
+          git commit -m "feat(house): expor risco de alta de preços nos cenários"
+          git push
