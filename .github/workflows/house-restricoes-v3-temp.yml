@@ -21,7 +21,9 @@ jobs:
           node-version: '22.13.0'
           cache: npm
       - name: Apply deterministic patch
-        run: node .github/scripts/apply-house-restricoes-v3.mjs
+        run: |
+          node .github/scripts/fix-governanca-restricoes-type-v1.mjs
+          node .github/scripts/apply-house-restricoes-v3.mjs
       - name: Diff check
         run: git diff --check
       - run: npm ci
@@ -37,6 +39,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/cardapio/governanca-candidatos.ts src/components/cardapio/PlanejadorGovernanca.tsx
+          git add src/lib/cardapio/governanca-restricoes.ts src/lib/cardapio/governanca-candidatos.ts src/components/cardapio/PlanejadorGovernanca.tsx
           git commit -m "feat(house): usar restricoes na inteligencia e validar com Plus"
           git push
