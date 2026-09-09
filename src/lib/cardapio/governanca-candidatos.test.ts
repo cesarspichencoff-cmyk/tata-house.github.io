@@ -58,8 +58,13 @@ function aceitacaoFixture(): Aceitacao {
   };
 }
 
+const restricoesEquipe = {
+  [normalizar('Frango grelhado')]: 2,
+  [normalizar('Lombo suíno')]: 1,
+};
+
 describe('governanca-candidatos', () => {
-  it('analisa evidência sem inventar aceitação e conta repetição recente', () => {
+  it('analisa evidência sem inventar aceitação, conta repetição e mede impacto de restrições', () => {
     const dias = diasFixture();
     const metricas = analisarCenarioGovernanca({
       estadoBase: estadoFixture(),
@@ -70,6 +75,7 @@ describe('governanca-candidatos', () => {
         [normalizar('Frango grelhado')]: 1,
         [normalizar('Frango assado')]: 2,
       },
+      restricoesEquipe,
     });
 
     expect(metricas.pratosComAceitacao).toBe(2); // n=1 não entra como evidência mínima
@@ -77,6 +83,8 @@ describe('governanca-candidatos', () => {
     expect(metricas.aceitacaoMedia).toBeCloseTo(4.25, 5);
     expect(metricas.pratosRecentes).toBe(2);
     expect(metricas.ocorrenciasRecentes).toBe(3);
+    expect(metricas.ocorrenciasRestricao).toBe(2);
+    expect(metricas.pessoasRestricaoSomadas).toBe(3);
     expect(metricas.proteinasDistintas).toBe(4);
     expect(metricas.nutricaoMedia).toBeGreaterThanOrEqual(20);
     expect(metricas.nutricaoMedia).toBeLessThanOrEqual(100);
@@ -108,13 +116,14 @@ describe('governanca-candidatos', () => {
     expect(aplicarCenarioAoEstado(base, diasFixture().slice(0, 6))).toBe(base);
   });
 
-  it('gera estratégias usando o motor real e entrega métricas comparáveis', () => {
+  it('gera estratégias com o motor real e leva restrições como critério explícito de decisão', () => {
     const cenarios = gerarCenariosGovernanca({
       estado: estadoFixture(),
       precos: {},
       aceitacao: aceitacaoFixture(),
       frequencia: {},
       estoque: {},
+      restricoesEquipe,
     });
 
     expect(cenarios.length).toBe(3);
@@ -124,7 +133,9 @@ describe('governanca-candidatos', () => {
       expect(cenario.dias.every((d) => d.principal.trim().length > 0)).toBe(true);
       expect(cenario.metricas.erros).toBeGreaterThanOrEqual(0);
       expect(cenario.metricas.alertas).toBeGreaterThanOrEqual(0);
-      expect(cenario.porques.length).toBeGreaterThanOrEqual(3);
+      expect(cenario.metricas.ocorrenciasRestricao).toBeGreaterThanOrEqual(0);
+      expect(cenario.metricas.pessoasRestricaoSomadas).toBeGreaterThanOrEqual(0);
+      expect(cenario.porques.some((p) => /restri/i.test(p))).toBe(true);
       expect(cenario.fingerprint.length).toBeGreaterThan(20);
     }
   });
