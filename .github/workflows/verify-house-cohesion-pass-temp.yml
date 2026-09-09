@@ -59,6 +59,7 @@ jobs:
         shell: bash
         run: |
           cd work
+          git add -N .
           git diff --name-only dc6bb54a22bf89f671aaaf1a91ce340cb406bf4a -- > /tmp/files
           cat /tmp/files
           grep -qx 'src/lib/cardapio/estado.tsx' /tmp/files
