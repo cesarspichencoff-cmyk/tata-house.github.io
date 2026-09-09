@@ -1,0 +1,44 @@
+name: House Demand Baseline Temp
+
+on:
+  push:
+    branches:
+      - feat/house-plus-intelligence-v2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - name: Apply demand baseline patch
+        run: node .github/scripts/apply-house-demand-baseline-v1.mjs
+      - run: git diff --check
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Preserve manager override semantics
+        run: |
+          grep -Fq "baseline automático do House" src/lib/cardapio/governanca-candidatos.ts
+          grep -Fq "podeCalibrarDemandaAutomaticamente" src/lib/cardapio/governanca-candidatos.test.ts
+          echo "HOUSE_AUTO_BASELINE_CAN_BE_CALIBRATED=PASS"
+          echo "HOUSE_MANAGER_OVERRIDE_PRESERVED=PASS"
+      - name: Commit verified product patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/cardapio/governanca-candidatos.ts src/lib/cardapio/governanca-candidatos.test.ts src/components/cardapio/CenariosGovernanca.tsx src/components/cardapio/PlanejadorGovernanca.tsx
+          git commit -m "fix(house): distinguir baseline aprendido de ajuste humano"
+          git push
