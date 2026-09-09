@@ -5,6 +5,7 @@ import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import { CenariosGovernanca } from './CenariosGovernanca';
 import {
+  datasDaSemana,
   lerDesperdicio,
   lerSemana,
   semanaVazia,
@@ -12,6 +13,7 @@ import {
   useAceitacao,
   useAprendizado,
   useEstoque,
+  useEventos,
   useFornecedores,
   useFuncionarios,
   useHistoricoPrecos,
@@ -148,6 +150,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
   const { estoque } = useEstoque();
+  const { eventos } = useEventos();
   const { funcionarios } = useFuncionarios();
   const { estimativas } = useEstimativas();
   const historico = useHistoricoPrecos();
@@ -178,6 +181,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
 
   const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
   const baselineAutomatico = useMemo(() => semanaVazia().dias.map((d) => d.pessoas), []);
+  const datasSemana = useMemo(() => datasDaSemana(contexto.semanaId).map((d) => d.toISOString().slice(0, 10)), [contexto.semanaId]);
   const desperdicioHistorico = semanasComConteudo().flatMap((sid) => lerDesperdicio(sid));
 
   const prontidao = useMemo(
@@ -306,6 +310,8 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               restricoesEquipe={restricoesEquipe}
               desperdicioHistorico={desperdicioHistorico}
               baselineAutomatico={baselineAutomatico}
+              eventos={eventos}
+              datasSemana={datasSemana}
             />
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">

@@ -16,7 +16,7 @@ import {
   resumoOperacionalOficial,
 } from './governanca-readonly';
 import { impactoRestricoesLocais } from './governanca-restricoes';
-import type { DiaCardapio, EstadoSemana, RegistroDesperdicio } from './tipos';
+import type { DiaCardapio, EstadoSemana, EventoDemanda, RegistroDesperdicio } from './tipos';
 
 export type ModoCenarioGovernanca = 'historico' | 'equilibrado' | 'criativo';
 export type AceitacaoPlanejamento = Record<string, { n: number; somaNotas: number }>;
@@ -54,6 +54,7 @@ export interface CenarioGovernanca {
   porques: string[];
   fingerprint: string;
   semelhanteA?: ModoCenarioGovernanca;
+  demanda: { eventosAplicados: number; eventosRevisao: number; ajustesHumanosPreservados: number };
 }
 
 export interface ContextoCenariosGovernanca {
@@ -69,6 +70,10 @@ export interface ContextoCenariosGovernanca {
   desperdicioHistorico?: RegistroDesperdicio[];
   /** Pessoas geradas automaticamente pelo próprio House antes de qualquer ajuste humano. */
   baselineAutomatico?: number[];
+  /** Eventos manuais já existentes no House; fator segue a semântica do módulo de previsão. */
+  eventos?: EventoDemanda[];
+  /** Datas ISO (yyyy-mm-dd), 0=segunda … 6=domingo, da semana autorizada. */
+  datasSemana?: string[];
 }
 
 const META: Record<ModoCenarioGovernanca, { titulo: string; selo: string; descricao: string }> = {
@@ -291,6 +296,7 @@ function montarCenario(
     metricas,
     porques: construirPorques(modo, metricas),
     fingerprint: fingerprintDias(dias),
+    demanda: { eventosAplicados: 0, eventosRevisao: 0, ajustesHumanosPreservados: 0 },
   };
 }
 
@@ -306,15 +312,78 @@ export function podeCalibrarDemandaAutomaticamente(
   return pessoasAtual === PESSOAS_PADRAO[indice];
 }
 
+export interface ResultadoEventosDemandaGovernanca {
+  dias: DiaCardapio[];
+  eventosAplicados: number;
+  eventosRevisao: number;
+  ajustesHumanosPreservados: number;
+  mensagens: string[];
+}
+
+/**
+ * Reusa a semântica de EventoDemanda já existente no House: fator multiplica demanda.
+ * No comparador, porém, evento nunca atropela ajuste humano e fator=0 (fechado)
+ * exige decisão explícita porque o modelo atual ainda mantém sete pratos na semana.
+ */
+export function aplicarEventosDemandaGovernanca(args: {
+  dias: DiaCardapio[];
+  diasOriginais: DiaCardapio[];
+  eventos?: EventoDemanda[];
+  datasSemana?: string[];
+  baselineAutomatico?: number[];
+}): ResultadoEventosDemandaGovernanca {
+  const dias = clonarDias(args.dias);
+  const mensagens: string[] = [];
+  let eventosAplicados = 0;
+  let eventosRevisao = 0;
+  let ajustesHumanosPreservados = 0;
+  if (!Array.isArray(args.datasSemana) || args.datasSemana.length !== 7) {
+    return { dias, eventosAplicados, eventosRevisao, ajustesHumanosPreservados, mensagens };
+  }
+  const eventos = Array.isArray(args.eventos) ? args.eventos : [];
+  dias.forEach((dia, i) => {
+    const data = args.datasSemana?.[i];
+    const doDia = eventos.filter((e) => e.data === data);
+    if (!doDia.length) return;
+    if (doDia.length > 1) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: há ${doDia.length} eventos cadastrados para o mesmo dia; nenhum fator foi aplicado automaticamente.`);
+      return;
+    }
+    const evento = doDia[0];
+    const fator = Number(evento.fator);
+    if (!Number.isFinite(fator) || fator < 0) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: o evento “${evento.rotulo}” tem fator inválido e foi mantido somente para revisão.`);
+      return;
+    }
+    if (fator === 0) {
+      eventosRevisao += 1;
+      mensagens.push(`${data}: “${evento.rotulo}” marca dia fechado (fator 0). O comparador não cria fechamento sozinho; exige decisão humana.`);
+      return;
+    }
+    const original = args.diasOriginais[i];
+    if (!original || !podeCalibrarDemandaAutomaticamente(original.pessoas, i, args.baselineAutomatico)) {
+      ajustesHumanosPreservados += 1;
+      mensagens.push(`${data}: “${evento.rotulo}” não sobrescreveu a quantidade ajustada manualmente pelo gestor.`);
+      return;
+    }
+    dia.pessoas = Math.max(1, Math.round(dia.pessoas * fator));
+    eventosAplicados += 1;
+    mensagens.push(`${data}: “${evento.rotulo}” aplicou fator ${fator.toFixed(2)} sobre a demanda automática.`);
+  });
+  return { dias, eventosAplicados, eventosRevisao, ajustesHumanosPreservados, mensagens };
+}
+
 function contextoComInteligenciaOficial(
   contexto: ContextoCenariosGovernanca,
-): { contexto: ContextoCenariosGovernanca; usouDemanda: number; amostraOficial: number; resumo: ReturnType<typeof resumoOperacionalOficial> } {
+): { contexto: ContextoCenariosGovernanca; usouDemanda: number; amostraOficial: number; resumo: ReturnType<typeof resumoOperacionalOficial>; eventos: Omit<ResultadoEventosDemandaGovernanca, 'dias'> } {
   const evidencia = evidenciaGovernancaAtual();
   const aceitacao = aceitacaoParaPlanejamento(contexto.aceitacao, evidencia);
   const demanda = demandaOficialPorDiaSemana(evidencia);
   let usouDemanda = 0;
 
-  const dias = contexto.estado.dias.map((dia, i) => {
+  const diasCalibrados = contexto.estado.dias.map((dia, i) => {
     const ref = demanda[i];
     // O baseline automático pode já ter sido aprendido pelo próprio House e, portanto,
     // ser diferente do PESSOAS_PADRAO. Só a alteração humana bloqueia a calibração oficial.
@@ -323,15 +392,29 @@ function contextoComInteligenciaOficial(
     return { ...dia, pessoas: Math.max(1, Math.round(ref.mediaServido)) };
   });
 
+  const eventosAplicados = aplicarEventosDemandaGovernanca({
+    dias: diasCalibrados,
+    diasOriginais: contexto.estado.dias,
+    eventos: contexto.eventos,
+    datasSemana: contexto.datasSemana,
+    baselineAutomatico: contexto.baselineAutomatico,
+  });
+
   return {
     contexto: {
       ...contexto,
-      estado: { ...contexto.estado, dias },
+      estado: { ...contexto.estado, dias: eventosAplicados.dias },
       aceitacao,
     },
     usouDemanda,
     amostraOficial: evidencia?.principais.reduce((s, p) => s + p.amostraAvaliacoes, 0) ?? 0,
     resumo: resumoOperacionalOficial(evidencia),
+    eventos: {
+      eventosAplicados: eventosAplicados.eventosAplicados,
+      eventosRevisao: eventosAplicados.eventosRevisao,
+      ajustesHumanosPreservados: eventosAplicados.ajustesHumanosPreservados,
+      mensagens: eventosAplicados.mensagens,
+    },
   };
 }
 
@@ -394,6 +477,7 @@ export function gerarCenariosGovernanca(
     .map(([modo, dias]) => montarCenario(modo, dias, ctx))
     .map((cenario) => {
       const porques = [...cenario.porques];
+      integrado.eventos.mensagens.forEach((m) => porques.unshift(`Evento de demanda: ${m}`));
       if (integrado.amostraOficial > 0) {
         porques.unshift(`Aceitação oficial do TATÁ Plus/QR carregada como fonte prioritária (${integrado.amostraOficial} voto(s) no recorte).`);
       }
@@ -406,7 +490,15 @@ export function gerarCenariosGovernanca(
       if (integrado.resumo?.indiceSaudavelMedio !== null && integrado.resumo?.indiceSaudavelMedio !== undefined) {
         porques.push(`Índice saudável oficial médio no recorte: ${integrado.resumo.indiceSaudavelMedio.toFixed(0)}/100.`);
       }
-      return { ...cenario, porques };
+      return {
+        ...cenario,
+        porques,
+        demanda: {
+          eventosAplicados: integrado.eventos.eventosAplicados,
+          eventosRevisao: integrado.eventos.eventosRevisao,
+          ajustesHumanosPreservados: integrado.eventos.ajustesHumanosPreservados,
+        },
+      };
     });
 
   const vistos = new Map<string, ModoCenarioGovernanca>();

@@ -4,10 +4,11 @@ import {
   agregarDesperdicioHistorico,
   analisarCenarioGovernanca,
   aplicarCenarioAoEstado,
+  aplicarEventosDemandaGovernanca,
   gerarCenariosGovernanca,
   podeCalibrarDemandaAutomaticamente,
 } from './governanca-candidatos';
-import type { Aceitacao, DiaCardapio, EstadoSemana, RegistroDesperdicio } from './tipos';
+import type { Aceitacao, DiaCardapio, EstadoSemana, EventoDemanda, RegistroDesperdicio } from './tipos';
 
 function diasFixture(): DiaCardapio[] {
   const principais = [
@@ -72,6 +73,43 @@ const desperdicioHistorico: RegistroDesperdicio[] = [
 ];
 
 describe('governanca-candidatos', () => {
+  it('aplica evento positivo somente sobre baseline automático e falha fechado para dia fechado/ambíguo', () => {
+    const base = diasFixture();
+    const datas = ['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12','2026-09-13'];
+    const baseline = base.map((d) => d.pessoas);
+    const evento: EventoDemanda = { id: 'e1', data: datas[0], rotulo: 'Treinamento', fator: 1.2 };
+    const aplicado = aplicarEventosDemandaGovernanca({ dias: base, diasOriginais: base, eventos: [evento], datasSemana: datas, baselineAutomatico: baseline });
+    expect(aplicado.dias[0].pessoas).toBe(72);
+    expect(aplicado.eventosAplicados).toBe(1);
+    expect(aplicado.eventosRevisao).toBe(0);
+
+    const fechado = aplicarEventosDemandaGovernanca({ dias: base, diasOriginais: base, eventos: [{ ...evento, fator: 0, rotulo: 'Fechado' }], datasSemana: datas, baselineAutomatico: baseline });
+    expect(fechado.dias[0].pessoas).toBe(60);
+    expect(fechado.eventosRevisao).toBe(1);
+    expect(fechado.mensagens.join(' ')).toMatch(/fechado/i);
+
+    const ambiguo = aplicarEventosDemandaGovernanca({ dias: base, diasOriginais: base, eventos: [evento, { ...evento, id: 'e2', rotulo: 'Outro' }], datasSemana: datas, baselineAutomatico: baseline });
+    expect(ambiguo.dias[0].pessoas).toBe(60);
+    expect(ambiguo.eventosRevisao).toBe(1);
+  });
+
+  it('evento não atropela ajuste humano de pessoas', () => {
+    const base = diasFixture();
+    const ajustado = base.map((d) => ({ ...d }));
+    ajustado[0].pessoas = 61;
+    const datas = ['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12','2026-09-13'];
+    const res = aplicarEventosDemandaGovernanca({
+      dias: ajustado,
+      diasOriginais: ajustado,
+      eventos: [{ id: 'e1', data: datas[0], rotulo: 'Evento', fator: 1.5 }],
+      datasSemana: datas,
+      baselineAutomatico: base.map((d) => d.pessoas),
+    });
+    expect(res.dias[0].pessoas).toBe(61);
+    expect(res.eventosAplicados).toBe(0);
+    expect(res.ajustesHumanosPreservados).toBe(1);
+  });
+
   it('distingue baseline aprendido automaticamente de ajuste humano', () => {
     expect(podeCalibrarDemandaAutomaticamente(72, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(true);
     expect(podeCalibrarDemandaAutomaticamente(74, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(false);
@@ -150,6 +188,8 @@ describe('governanca-candidatos', () => {
       restricoesEquipe,
       desperdicioHistorico,
       baselineAutomatico: estadoFixture().dias.map((d) => d.pessoas),
+      eventos: [{ id: 'e1', data: '2026-09-07', rotulo: 'Treinamento', fator: 1.1 }],
+      datasSemana: ['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12','2026-09-13'],
     });
 
     expect(cenarios.length).toBe(3);
@@ -163,6 +203,8 @@ describe('governanca-candidatos', () => {
       expect(cenario.metricas.pessoasRestricaoSomadas).toBeGreaterThanOrEqual(0);
       expect(cenario.porques.some((p) => /restri/i.test(p))).toBe(true);
       expect(cenario.porques.some((p) => /desperd[ií]cio/i.test(p))).toBe(true);
+      expect(cenario.porques.some((p) => /evento de demanda/i.test(p))).toBe(true);
+      expect(cenario.demanda.eventosAplicados).toBe(1);
       expect(cenario.fingerprint.length).toBeGreaterThan(20);
     }
   });
