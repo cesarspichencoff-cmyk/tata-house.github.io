@@ -21,7 +21,9 @@ jobs:
           node-version: '22.13.0'
           cache: npm
       - name: Apply price risk patch
-        run: node .github/scripts/apply-house-price-risk-v1.mjs
+        run: |
+          node .github/scripts/apply-house-price-risk-v1.mjs
+          node .github/scripts/fix-house-price-risk-ts-v1.mjs
       - name: Diff safety
         run: |
           git diff --check
