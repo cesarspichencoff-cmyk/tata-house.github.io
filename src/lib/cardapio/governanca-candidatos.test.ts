@@ -5,6 +5,7 @@ import {
   analisarCenarioGovernanca,
   aplicarCenarioAoEstado,
   gerarCenariosGovernanca,
+  podeCalibrarDemandaAutomaticamente,
 } from './governanca-candidatos';
 import type { Aceitacao, DiaCardapio, EstadoSemana, RegistroDesperdicio } from './tipos';
 
@@ -71,6 +72,12 @@ const desperdicioHistorico: RegistroDesperdicio[] = [
 ];
 
 describe('governanca-candidatos', () => {
+  it('distingue baseline aprendido automaticamente de ajuste humano', () => {
+    expect(podeCalibrarDemandaAutomaticamente(72, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(true);
+    expect(podeCalibrarDemandaAutomaticamente(74, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(false);
+    expect(podeCalibrarDemandaAutomaticamente(55, 0)).toBe(true);
+    expect(podeCalibrarDemandaAutomaticamente(60, 0)).toBe(false);
+  });
   it('normaliza desperdício por registro sem somar kg com porções', () => {
     const mapa = agregarDesperdicioHistorico(desperdicioHistorico);
     expect(mapa[normalizar('Frango grelhado')].n).toBe(2);
@@ -142,6 +149,7 @@ describe('governanca-candidatos', () => {
       estoque: {},
       restricoesEquipe,
       desperdicioHistorico,
+      baselineAutomatico: estadoFixture().dias.map((d) => d.pessoas),
     });
 
     expect(cenarios.length).toBe(3);

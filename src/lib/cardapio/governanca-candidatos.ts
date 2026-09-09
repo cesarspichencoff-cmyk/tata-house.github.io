@@ -67,6 +67,8 @@ export interface ContextoCenariosGovernanca {
   estoque?: Record<string, number>;
   restricoesEquipe?: Record<string, number>;
   desperdicioHistorico?: RegistroDesperdicio[];
+  /** Pessoas geradas automaticamente pelo próprio House antes de qualquer ajuste humano. */
+  baselineAutomatico?: number[];
 }
 
 const META: Record<ModoCenarioGovernanca, { titulo: string; selo: string; descricao: string }> = {
@@ -292,6 +294,18 @@ function montarCenario(
   };
 }
 
+export function podeCalibrarDemandaAutomaticamente(
+  pessoasAtual: number,
+  indice: number,
+  baselineAutomatico?: number[],
+): boolean {
+  const aprendido = baselineAutomatico?.[indice];
+  if (typeof aprendido === 'number' && Number.isFinite(aprendido) && aprendido > 0) {
+    return pessoasAtual === Math.round(aprendido);
+  }
+  return pessoasAtual === PESSOAS_PADRAO[indice];
+}
+
 function contextoComInteligenciaOficial(
   contexto: ContextoCenariosGovernanca,
 ): { contexto: ContextoCenariosGovernanca; usouDemanda: number; amostraOficial: number; resumo: ReturnType<typeof resumoOperacionalOficial> } {
@@ -302,9 +316,9 @@ function contextoComInteligenciaOficial(
 
   const dias = contexto.estado.dias.map((dia, i) => {
     const ref = demanda[i];
-    // Só calibra automaticamente quando o valor ainda é o baseline padrão.
-    // Se o gestor já mexeu no número de pessoas, a decisão humana prevalece.
-    if (!ref || ref.amostra < 2 || dia.pessoas !== PESSOAS_PADRAO[i]) return { ...dia };
+    // O baseline automático pode já ter sido aprendido pelo próprio House e, portanto,
+    // ser diferente do PESSOAS_PADRAO. Só a alteração humana bloqueia a calibração oficial.
+    if (!ref || ref.amostra < 2 || !podeCalibrarDemandaAutomaticamente(dia.pessoas, i, contexto.baselineAutomatico)) return { ...dia };
     usouDemanda += 1;
     return { ...dia, pessoas: Math.max(1, Math.round(ref.mediaServido)) };
   });
@@ -384,7 +398,7 @@ export function gerarCenariosGovernanca(
         porques.unshift(`Aceitação oficial do TATÁ Plus/QR carregada como fonte prioritária (${integrado.amostraOficial} voto(s) no recorte).`);
       }
       if (integrado.usouDemanda > 0) {
-        porques.unshift(`Contagem real de refeições calibrou ${integrado.usouDemanda} dia(s) que ainda estavam no baseline padrão; ajustes manuais do gestor foram preservados.`);
+        porques.unshift(`Contagem real de refeições calibrou ${integrado.usouDemanda} dia(s) que ainda estavam no baseline automático do House; ajustes manuais do gestor foram preservados.`);
       }
       if (integrado.resumo?.diasComDesperdicioRegistrado) {
         porques.push(`Há desperdício oficial registrado em ${integrado.resumo.diasComDesperdicioRegistrado} dia(s). O dado fica visível como evidência e não vira penalidade inventada sem unidade comparável.`);

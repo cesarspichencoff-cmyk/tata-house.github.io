@@ -7,6 +7,7 @@ import { CenariosGovernanca } from './CenariosGovernanca';
 import {
   lerDesperdicio,
   lerSemana,
+  semanaVazia,
   semanasComConteudo,
   useAceitacao,
   useAprendizado,
@@ -176,6 +177,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   ), [estoque]);
 
   const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
+  const baselineAutomatico = useMemo(() => semanaVazia().dias.map((d) => d.pessoas), []);
   const desperdicioHistorico = semanasComConteudo().flatMap((sid) => lerDesperdicio(sid));
 
   const prontidao = useMemo(
@@ -303,6 +305,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               estoque={estoqueQuantidade}
               restricoesEquipe={restricoesEquipe}
               desperdicioHistorico={desperdicioHistorico}
+              baselineAutomatico={baselineAutomatico}
             />
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">

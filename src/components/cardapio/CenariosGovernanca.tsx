@@ -134,6 +134,7 @@ export function CenariosGovernanca({
   estoque,
   restricoesEquipe,
   desperdicioHistorico,
+  baselineAutomatico,
 }: {
   estado: EstadoSemana;
   atualizar: (fn: (estado: EstadoSemana) => EstadoSemana) => void;
@@ -146,6 +147,7 @@ export function CenariosGovernanca({
   estoque: Record<string, number>;
   restricoesEquipe: Record<string, number>;
   desperdicioHistorico: RegistroDesperdicio[];
+  baselineAutomatico: number[];
 }) {
   const [cenarios, setCenarios] = useState<CenarioGovernanca[]>([]);
   const [aplicado, setAplicado] = useState<string | null>(null);
@@ -163,6 +165,7 @@ export function CenariosGovernanca({
       estoque,
       restricoesEquipe,
       desperdicioHistorico,
+      baselineAutomatico,
     });
     setCenarios(novos);
     setAplicado(null);
