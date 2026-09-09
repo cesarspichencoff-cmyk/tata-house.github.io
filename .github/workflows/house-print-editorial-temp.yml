@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-and-verify:
+  verify-materialized:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,14 +20,12 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: npm
-      - name: Apply editorial print patch
-        run: node .github/scripts/apply-house-print-editorial-v1.mjs
-      - name: Diff safety
+      - name: Idempotence and scope
         run: |
+          node .github/scripts/apply-house-print-editorial-v1.mjs
           git diff --check
-          changed=$(git diff --name-only)
-          test "$changed" = "src/components/cardapio/PosterSemana.tsx" || { echo "$changed"; exit 1; }
-          echo "HOUSE_PRINT_SCOPE_ONLY_POSTER=PASS"
+          test -z "$(git diff --name-only)" || { git diff --name-only; exit 1; }
+          echo "HOUSE_PRINT_MATERIALIZED_IDEMPOTENT=PASS"
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -45,14 +43,3 @@ jobs:
           echo "HOUSE_PRINT_QR_PRESERVED=PASS"
           echo "HOUSE_PRINT_BROWSER_PRINT_PRESERVED=PASS"
           echo "HOUSE_PRINT_EDITORIAL_HIERARCHY=PASS"
-      - name: Commit verified product patch
-        run: |
-          if git diff --quiet; then
-            echo "HOUSE_PRINT_ALREADY_MATERIALIZED=PASS"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/cardapio/PosterSemana.tsx
-          git commit -m "feat(house): refinar cardápio impresso com direção editorial"
-          git push
