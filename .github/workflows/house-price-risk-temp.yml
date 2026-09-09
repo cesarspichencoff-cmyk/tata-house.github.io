@@ -24,6 +24,7 @@ jobs:
         run: |
           node .github/scripts/apply-house-price-risk-v1.mjs
           node .github/scripts/fix-house-price-risk-ts-v1.mjs
+          node .github/scripts/fix-house-price-risk-test-v1.mjs
       - name: Diff safety
         run: |
           git diff --check
@@ -47,6 +48,7 @@ jobs:
           grep -Fq "não é penalizada duas vezes" src/lib/cardapio/governanca-candidatos.ts
           grep -Fq 'label="Preço em alta"' src/components/cardapio/CenariosGovernanca.tsx
           grep -Fq "custoTotal).toBe(semRadar.custoTotal" src/lib/cardapio/governanca-candidatos.test.ts
+          grep -Fq "maiorAltaPrecoPct).toBeGreaterThanOrEqual(15" src/lib/cardapio/governanca-candidatos.test.ts
           echo "HOUSE_PRICE_RISK_REUSES_RADAR=PASS"
           echo "HOUSE_PRICE_RISK_NO_DOUBLE_PENALTY=PASS"
       - name: Commit verified product patch
