@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-and-verify:
+  verify-materialized-candidate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,10 +20,8 @@ jobs:
         with:
           node-version: '22.13.0'
           cache: npm
-      - name: Apply waste intelligence patch once
-        run: node .github/scripts/apply-house-waste-intelligence-v1.mjs
       - name: Diff check
-        run: git diff --check
+        run: git diff --check 7f77fc88a12b11d40a185230f50d34172528082e...HEAD
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -46,21 +44,7 @@ jobs:
           grep -Fq "sugerirSemanaCriativa" src/lib/cardapio/governanca-candidatos.ts
           grep -Fq "sugerirSemana(" src/lib/cardapio/governanca-candidatos.ts
           grep -Fq "Desperdício" src/components/cardapio/CenariosGovernanca.tsx
+          echo "HOUSE_MATERIALIZED_CANDIDATE=PASS"
           echo "HOUSE_AUTO_GENERATOR_PRESERVED=PASS"
           echo "HOUSE_QR_PRINT_PRESERVED=PASS"
           echo "HOUSE_WASTE_VISIBLE=PASS"
-      - name: Commit verified product patch
-        run: |
-          if git diff --quiet; then
-            echo "NO_PATCH_DIFF=PASS"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            src/lib/cardapio/governanca-candidatos.ts \
-            src/lib/cardapio/governanca-candidatos.test.ts \
-            src/components/cardapio/CenariosGovernanca.tsx \
-            src/components/cardapio/PlanejadorGovernanca.tsx
-          git commit -m "feat(house): usar desperdicio real na inteligencia de cardapio"
-          git push
