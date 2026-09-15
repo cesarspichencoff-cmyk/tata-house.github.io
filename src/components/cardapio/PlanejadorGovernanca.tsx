@@ -13,12 +13,11 @@ import {
   useFornecedores,
   useHistoricoPrecos,
   useItensExtras,
-  useOfertas,
   usePrecos,
-  useSemana,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
 import { normalizar } from '@/lib/cardapio/motor';
+import { useSemanaGovernancaShadow } from '@/lib/cardapio/use-semana-governanca-shadow';
 import {
   avaliarProntidaoPlanejamento,
   construirDraftPlanejamentoGovernanca,
@@ -129,11 +128,13 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [evidenciaReadOnly, setEvidenciaReadOnly] = useState<EvidenciaGovernancaReadOnlyV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
-  const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
-  const { precos, definirPreco } = usePrecos();
-  const { fornecedores, definirFornecedor } = useFornecedores();
-  const { registrarOferta } = useOfertas();
-  const { itensExtras, cadastrarItem } = useItensExtras();
+  // Coexistência segura: a semana real é somente a semente. Toda edição da
+  // superfície de Governança acontece numa cópia destacada em memória e não
+  // chama o updater persistente de useSemana.
+  const { estado, atualizar, pronto } = useSemanaGovernancaShadow(contexto.semanaId);
+  const { precos } = usePrecos();
+  const { fornecedores } = useFornecedores();
+  const { itensExtras } = useItensExtras();
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
   const { estoque } = useEstoque();
@@ -208,7 +209,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     return (
       <main className="min-h-screen bg-areia-50 px-4 py-10 dark:bg-carvao-950">
         <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 text-sm text-texto-suave shadow-sm dark:bg-carvao-900">
-          Carregando estado operacional da semana…
+          Carregando estado operacional da semana sem liberar escrita…
         </div>
       </main>
     );
@@ -223,6 +224,10 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
           bloqueios={prontidao.bloqueios}
           alertas={prontidao.alertas}
         />
+
+        <section data-testid="governanca-shadow-isolado" className="rounded-2xl border border-ouro-200 bg-ouro-50/80 px-4 py-3 text-sm leading-6 text-ouro-900 dark:border-ouro-800 dark:bg-ouro-950/20 dark:text-ouro-100">
+          <strong>Modo de transição isolado:</strong> mudanças de cardápio feitas aqui ficam somente nesta proposta e não alteram a semana operacional nem a lista de compras do TATÁ House em uso. Recarregar a página descarta o rascunho local não enviado.
+        </section>
 
         {evidenciaReadOnly && (
           <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
@@ -270,7 +275,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
               <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
-                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Os geradores antigos continuam disponíveis como ferramenta secundária, mas não substituem a comparação acima.
+                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Nesta superfície os ajustes ficam no rascunho isolado até o envio da proposta.
               </div>
               <AbaCardapio
                 estado={estado}
@@ -279,10 +284,6 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
                 fatores={fatores}
                 podeEditar={true}
                 precos={precos}
-                definirPreco={definirPreco}
-                definirFornecedor={definirFornecedor}
-                cadastrarItem={cadastrarItem}
-                registrarOferta={registrarOferta}
                 fornecedores={fornecedores}
                 itensExtras={itensExtras}
               />
