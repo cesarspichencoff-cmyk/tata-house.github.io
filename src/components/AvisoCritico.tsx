@@ -27,11 +27,26 @@ function useErroSustentado(erroDesde: number | null): boolean {
   return passouLimiar;
 }
 
+export function armazenamentoCheioMasConfirmadoNaNuvem(status: StatusNuvem, pendentes: number): boolean {
+  return status === 'online' && pendentes === 0;
+}
+
 export function mensagemArmazenamentoCheio(status: StatusNuvem, pendentes: number): string {
   const fila =
     pendentes > 0
       ? ` Há ${pendentes} alteração(ões) ainda aguardando confirmação.`
       : '';
+
+  // Cache local cheio NÃO é igual a dado perdido. Quando o próprio motor de
+  // sincronização declara online e não existe nenhuma revisão pendente, as
+  // alterações operacionais conhecidas já foram confirmadas na nuvem.
+  if (armazenamentoCheioMasConfirmadoNaNuvem(status, pendentes)) {
+    return (
+      'O cache local deste aparelho atingiu o limite, mas as alterações operacionais estão confirmadas na nuvem.' +
+      ' Você pode continuar usando o app. O modo offline deste aparelho pode ficar limitado até liberar espaço.' +
+      ' Em Ajustes, use “A sincronização está funcionando?” para conferir armazenamento e nuvem.'
+    );
+  }
 
   if (status === 'erro') {
     return (
@@ -61,8 +76,9 @@ export function AvisoCritico() {
   const erroSustentado = useErroSustentado(erroDesde);
 
   if (cheio) {
+    const confirmado = armazenamentoCheioMasConfirmadoNaNuvem(status, pendentes);
     return (
-      <Banner cor="bg-perigo">
+      <Banner cor={confirmado ? 'bg-alerta' : 'bg-perigo'}>
         {mensagemArmazenamentoCheio(status, pendentes)}
       </Banner>
     );
