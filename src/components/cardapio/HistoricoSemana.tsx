@@ -52,7 +52,15 @@ export function HistoricoSemana({
   if (!podeEditar) return null;
 
   const restaurar = (v: VersaoSemana) => {
-    aoRestaurar(v.estado);
+    // Os snapshots locais não carregam mais fotos de NF para não multiplicar
+    // megabytes no localStorage. Restaurar o cardápio preserva os anexos que
+    // existem AGORA na semana em vez de apagá-los/recuá-los junto com o menu.
+    const restaurado: EstadoSemana = {
+      ...v.estado,
+      ...(estado.notas ? { notas: estado.notas } : {}),
+      ...(estado.notasFiscais ? { notasFiscais: estado.notasFiscais } : {}),
+    };
+    aoRestaurar(restaurado);
     setAberto(false);
     toast(`Cardápio restaurado para a versão de ${quando(v.em)}`);
   };
