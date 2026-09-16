@@ -3,6 +3,7 @@ import {
   ehErroDeQuota,
   gravarComRecuperacaoDeQuota,
   liberarHistoricosLocais,
+  liberarRascunhoCotacaoLocal,
 } from './armazenamento-local-seguro';
 
 class StorageFake {
@@ -86,9 +87,42 @@ describe('armazenamento-local-seguro', () => {
     expect(s.getItem('cardapio.v1.semana.2026-S34')).toBe('ANTERIOR');
   });
 
+  it('se histórico não basta, descarta o texto bruto da cotação e preserva dados operacionais', () => {
+    const s = new StorageFake();
+    s.dados.set('cardapio.v1.__hist.2026-S34', 'h'.repeat(20));
+    s.dados.set('cardapio.v1.cotacao.texto', 'cotacao'.repeat(50));
+    s.dados.set('cardapio.v1.semana.2026-S34', 'CARDAPIO-REAL');
+    s.dados.set('cardapio.v1.precos', 'PRECOS-REAIS');
+    s.dados.set('cardapio.v1.__base.semana.2026-S34', 'BASE-MERGE');
+    s.limite = 190;
+
+    const r = gravarComRecuperacaoDeQuota(
+      s as unknown as Storage,
+      'cardapio.v1.semana.2026-S35',
+      'NOVO-CARDAPIO',
+    );
+
+    expect(r.ok).toBe(true);
+    expect(r.quota).toBe(true);
+    expect(r.historicosRemovidos).toBe(1);
+    expect(s.getItem('cardapio.v1.cotacao.texto')).toBeNull();
+    expect(s.getItem('cardapio.v1.semana.2026-S34')).toBe('CARDAPIO-REAL');
+    expect(s.getItem('cardapio.v1.precos')).toBe('PRECOS-REAIS');
+    expect(s.getItem('cardapio.v1.__base.semana.2026-S34')).toBe('BASE-MERGE');
+    expect(s.getItem('cardapio.v1.semana.2026-S35')).toBe('NOVO-CARDAPIO');
+  });
+
+  it('não apaga o rascunho antigo quando a própria gravação é cotacao.texto', () => {
+    const s = new StorageFake();
+    s.dados.set('cardapio.v1.cotacao.texto', 'RASCUNHO-ANTERIOR');
+    expect(liberarRascunhoCotacaoLocal(s as unknown as Storage, 'cardapio.v1.cotacao.texto')).toBe(0);
+    expect(s.getItem('cardapio.v1.cotacao.texto')).toBe('RASCUNHO-ANTERIOR');
+  });
+
   it('não apaga nada quando o erro não é de quota', () => {
     const s = new StorageFake();
     s.dados.set('cardapio.v1.__hist.2026-S35', 'HIST');
+    s.dados.set('cardapio.v1.cotacao.texto', 'COTACAO');
     const storage = s as unknown as Storage;
     storage.setItem = () => { throw new Error('Storage indisponível'); };
 
@@ -96,5 +130,6 @@ describe('armazenamento-local-seguro', () => {
     expect(r.ok).toBe(false);
     expect(r.quota).toBe(false);
     expect(s.getItem('cardapio.v1.__hist.2026-S35')).toBe('HIST');
+    expect(s.getItem('cardapio.v1.cotacao.texto')).toBe('COTACAO');
   });
 });
