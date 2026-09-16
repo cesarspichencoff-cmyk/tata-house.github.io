@@ -30,10 +30,22 @@ export interface ResultadoDiagnostico {
   vereditoGeral: Veredito;
 }
 
+interface TamanhoChave {
+  chave: string;
+  bytes: number;
+}
+
 interface MedidaLocal {
+  /** Somente chaves operacionais visíveis/diagnosticáveis. */
   valores: Map<string, string>;
-  totalBytes: number;
-  maiores: { chave: string; bytes: number }[];
+  totalOperacionalBytes: number;
+  totalBrutoBytes: number;
+  basesBytes: number;
+  historicosBytes: number;
+  outrosInternosBytes: number;
+  chavesInternas: number;
+  maioresOperacionais: TamanhoChave[];
+  maioresInternas: TamanhoChave[];
 }
 
 function explicar(erro: unknown): string {
@@ -71,27 +83,78 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function fmtData(iso?: string): string {
+  if (!iso) return 'sem carimbo';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function medirLocal(): MedidaLocal {
   const valores = new Map<string, string>();
-  const tamanhos: { chave: string; bytes: number }[] = [];
-  let totalBytes = 0;
+  const operacionais: TamanhoChave[] = [];
+  const internas: TamanhoChave[] = [];
+  let totalOperacionalBytes = 0;
+  let totalBrutoBytes = 0;
+  let basesBytes = 0;
+  let historicosBytes = 0;
+  let outrosInternosBytes = 0;
+  let chavesInternas = 0;
 
-  if (typeof window === 'undefined') return { valores, totalBytes, maiores: [] };
+  const vazio: MedidaLocal = {
+    valores,
+    totalOperacionalBytes,
+    totalBrutoBytes,
+    basesBytes,
+    historicosBytes,
+    outrosInternosBytes,
+    chavesInternas,
+    maioresOperacionais: [],
+    maioresInternas: [],
+  };
+  if (typeof window === 'undefined') return vazio;
 
   for (let i = 0; i < localStorage.length; i++) {
     const full = localStorage.key(i);
     if (!full || !full.startsWith(PREFIXO_LOCAL)) continue;
     const chave = full.slice(PREFIXO_LOCAL.length);
-    if (chave.startsWith('__')) continue;
     const raw = localStorage.getItem(full) ?? '';
     const bytes = bytesDe(full) + bytesDe(raw);
+    totalBrutoBytes += bytes;
+
+    if (chave.startsWith('__')) {
+      chavesInternas += 1;
+      internas.push({ chave, bytes });
+      if (chave.startsWith('__base.')) basesBytes += bytes;
+      else if (chave.startsWith('__hist.')) historicosBytes += bytes;
+      else outrosInternosBytes += bytes;
+      continue;
+    }
+
     valores.set(chave, raw);
-    tamanhos.push({ chave, bytes });
-    totalBytes += bytes;
+    operacionais.push({ chave, bytes });
+    totalOperacionalBytes += bytes;
   }
 
-  tamanhos.sort((a, b) => b.bytes - a.bytes);
-  return { valores, totalBytes, maiores: tamanhos.slice(0, 7) };
+  operacionais.sort((a, b) => b.bytes - a.bytes);
+  internas.sort((a, b) => b.bytes - a.bytes);
+  return {
+    valores,
+    totalOperacionalBytes,
+    totalBrutoBytes,
+    basesBytes,
+    historicosBytes,
+    outrosInternosBytes,
+    chavesInternas,
+    maioresOperacionais: operacionais.slice(0, 7),
+    maioresInternas: internas.slice(0, 7),
+  };
 }
 
 function parseJson(raw: string): unknown {
@@ -106,15 +169,23 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
   const itens: ItemDiagnostico[] = [];
   const local = medirLocal();
   const { url, anonKey } = supabaseConfig();
+  const internosBytes = local.basesBytes + local.historicosBytes + local.outrosInternosBytes;
 
   itens.push({
     titulo: 'Armazenamento deste aparelho',
-    veredito: local.totalBytes > 4 * 1024 * 1024 ? 'aviso' : 'ok',
+    veredito: local.totalBrutoBytes > 4 * 1024 * 1024 ? 'aviso' : 'ok',
     detalhe:
-      `${local.valores.size} chave(s) · ${fmtBytes(local.totalBytes)} no localStorage. ` +
-      (local.maiores.length
-        ? `Maiores: ${local.maiores.map((x) => `${x.chave} (${fmtBytes(x.bytes)})`).join(', ')}.`
-        : 'Nenhuma chave local.'),
+      `${local.valores.size} chave(s) operacionais + ${local.chavesInternas} interna(s) · ` +
+      `${fmtBytes(local.totalBrutoBytes)} realmente medidos no localStorage ` +
+      `(${fmtBytes(local.totalOperacionalBytes)} operacionais + ${fmtBytes(internosBytes)} internos). ` +
+      `Bases de merge: ${fmtBytes(local.basesBytes)} · históricos de desfazer: ${fmtBytes(local.historicosBytes)} · ` +
+      `outros internos: ${fmtBytes(local.outrosInternosBytes)}. ` +
+      (local.maioresOperacionais.length
+        ? `Maiores operacionais: ${local.maioresOperacionais.map((x) => `${x.chave} (${fmtBytes(x.bytes)})`).join(', ')}. `
+        : '') +
+      (local.maioresInternas.length
+        ? `Maiores internas: ${local.maioresInternas.map((x) => `${x.chave} (${fmtBytes(x.bytes)})`).join(', ')}.`
+        : 'Nenhuma chave interna.'),
   });
 
   if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
@@ -124,7 +195,9 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
         itens.push({
           titulo: 'Quota total do navegador',
           veredito: e.usage / e.quota > 0.8 ? 'aviso' : 'ok',
-          detalhe: `${fmtBytes(e.usage)} usados de aproximadamente ${fmtBytes(e.quota)} disponíveis para este site (inclui IndexedDB/cache, não só localStorage).`,
+          detalhe:
+            `${fmtBytes(e.usage)} usados de aproximadamente ${fmtBytes(e.quota)} disponíveis para este site. ` +
+            'Essa estimativa inclui IndexedDB/cache e não prova que uma nova gravação síncrona no localStorage ainda caiba.',
         });
       }
     } catch { /* opcional */ }
@@ -207,6 +280,7 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
   }
 
   if (linhas) {
+    const remotoLinhas = new Map(linhas.map((r) => [r.chave, r]));
     const remoto = new Map(linhas.map((r) => [r.chave, r.valor]));
     const localComp = new Set(Array.from(local.valores.keys()).filter(comparavel));
     const remotoComp = new Set(Array.from(remoto.keys()).filter(comparavel));
@@ -214,12 +288,21 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
     const soLocal = Array.from(localComp).filter((k) => !remotoComp.has(k));
     const soNuvem = Array.from(remotoComp).filter((k) => !localComp.has(k));
     const divergentes: string[] = [];
+    const detalhesDivergentes: string[] = [];
 
     for (const k of Array.from(localComp)) {
       if (!remotoComp.has(k)) continue;
-      const l = parseJson(local.valores.get(k) ?? '');
-      const r = remoto.get(k);
-      if (serializarCanonico(l) !== serializarCanonico(r)) divergentes.push(k);
+      const rawLocal = local.valores.get(k) ?? '';
+      const l = parseJson(rawLocal);
+      const linhaRemota = remotoLinhas.get(k);
+      const r = linhaRemota?.valor;
+      if (serializarCanonico(l) !== serializarCanonico(r)) {
+        divergentes.push(k);
+        detalhesDivergentes.push(
+          `${k} (local ${fmtBytes(bytesDe(rawLocal))} · nuvem ${fmtBytes(bytesDe(serializarCanonico(r)))} · ` +
+          `nuvem atualizada ${fmtData(linhaRemota?.atualizado_em)})`,
+        );
+      }
     }
 
     const ok = soLocal.length === 0 && soNuvem.length === 0 && divergentes.length === 0;
@@ -228,7 +311,11 @@ export async function rodarDiagnostico(): Promise<ResultadoDiagnostico> {
       veredito: ok ? 'ok' : 'aviso',
       detalhe: ok
         ? `As ${localComp.size} chaves operacionais comparáveis têm o mesmo conteúdo nos dois lados.`
-        : `Só local: ${soLocal.join(', ') || 'nenhuma'} · só nuvem: ${soNuvem.join(', ') || 'nenhuma'} · conteúdo diferente: ${divergentes.join(', ') || 'nenhum'}.`,
+        : `Só local: ${soLocal.join(', ') || 'nenhuma'} · só nuvem: ${soNuvem.join(', ') || 'nenhuma'} · ` +
+          `conteúdo diferente: ${divergentes.join(', ') || 'nenhum'}. ` +
+          (detalhesDivergentes.length
+            ? `Detalhes: ${detalhesDivergentes.join(' · ')}. O aparelho não possui carimbo local equivalente; o horário remoto sozinho não decide qual lado é o correto.`
+            : ''),
     });
 
     const temAudV2 = remoto.has(CHAVE_AUDITORIA_V2);
