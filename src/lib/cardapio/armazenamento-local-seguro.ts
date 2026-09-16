@@ -3,12 +3,16 @@
 /* =====================================================================
    Recuperação mínima de quota do localStorage.
 
-   O histórico __hist.* é local-only e opcional. Quando a quota do navegador
-   estoura, ele é o primeiro (e único) dado que podemos descartar com segurança
-   para priorizar o dado operacional que a pessoa acabou de editar.
+   Ordem de descarte segura:
+   1. histórico __hist.* — snapshots locais de desfazer, opcionais;
+   2. cotacao.texto — rascunho bruto da última cotação, também opcional.
+
+   Nunca toca cardápio, preços aplicados, fornecedor, estoque, pendência,
+   base de merge, configuração ou qualquer outro dado operacional.
    ===================================================================== */
 
 const PREFIXO_HISTORICO = 'cardapio.v1.__hist.';
+const CHAVE_TEXTO_COTACAO = 'cardapio.v1.cotacao.texto';
 
 export function ehErroDeQuota(erro: unknown): boolean {
   // Safari/WebKit normalmente lança DOMException; não podemos depender de
@@ -54,6 +58,26 @@ export function liberarHistoricosLocais(storage: Storage): number {
   return remover.length;
 }
 
+/**
+ * A cotação bruta é só conveniência para reabrir o texto que foi colado.
+ * Depois que seus preços/ofertas foram aplicados, ela NÃO é dado operacional.
+ * Em quota, pode ser descartada antes de qualquer documento real do app.
+ *
+ * Se a própria gravação que falhou é a do texto da cotação, não removemos o
+ * valor anterior aqui: o componente mantém o texto atual em memória e decide
+ * sozinho se quer persistir de novo depois.
+ */
+export function liberarRascunhoCotacaoLocal(storage: Storage, chaveEmGravacao = ''): number {
+  if (chaveEmGravacao === CHAVE_TEXTO_COTACAO) return 0;
+  try {
+    if (storage.getItem(CHAVE_TEXTO_COTACAO) == null) return 0;
+    storage.removeItem(CHAVE_TEXTO_COTACAO);
+    return 1;
+  } catch {
+    return 0;
+  }
+}
+
 export interface ResultadoGravacaoLocal {
   ok: boolean;
   historicosRemovidos: number;
@@ -61,10 +85,15 @@ export interface ResultadoGravacaoLocal {
 }
 
 /**
- * Tenta a gravação normal. Só em QuotaExceededError remove __hist.* e repete
- * EXATAMENTE a mesma gravação uma vez. Não monkey-patcha Storage e não altera
- * o motor de nuvem — portanto a segunda tentativa continua passando pelo
- * BootNuvem já existente e, quando vence, é espelhada ao Supabase normalmente.
+ * Tenta a gravação normal. Em QuotaExceededError:
+ * 1) remove __hist.* e repete EXATAMENTE a mesma gravação;
+ * 2) se ainda não couber, remove o rascunho bruto cotacao.texto e tenta uma
+ *    última vez.
+ *
+ * Não monkey-patcha Storage e não altera o motor de nuvem — cada tentativa
+ * continua passando pelo BootNuvem existente e, quando aplicável, é espelhada
+ * ao Supabase normalmente. Dados operacionais nunca são descartados para
+ * abrir espaço.
  */
 export function gravarComRecuperacaoDeQuota(
   storage: Storage,
@@ -80,15 +109,28 @@ export function gravarComRecuperacaoDeQuota(
     }
 
     const historicosRemovidos = liberarHistoricosLocais(storage);
-    if (historicosRemovidos === 0) {
-      return { ok: false, historicosRemovidos: 0, quota: true };
+
+    if (historicosRemovidos > 0) {
+      try {
+        storage.setItem(chave, valor);
+        return { ok: true, historicosRemovidos, quota: true };
+      } catch (erroRetry) {
+        if (!ehErroDeQuota(erroRetry)) {
+          return { ok: false, historicosRemovidos, quota: true };
+        }
+      }
     }
 
-    try {
-      storage.setItem(chave, valor);
-      return { ok: true, historicosRemovidos, quota: true };
-    } catch {
-      return { ok: false, historicosRemovidos, quota: true };
+    const rascunhosRemovidos = liberarRascunhoCotacaoLocal(storage, chave);
+    if (rascunhosRemovidos > 0) {
+      try {
+        storage.setItem(chave, valor);
+        return { ok: true, historicosRemovidos, quota: true };
+      } catch {
+        return { ok: false, historicosRemovidos, quota: true };
+      }
     }
+
+    return { ok: false, historicosRemovidos, quota: true };
   }
 }
