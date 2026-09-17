@@ -1,5 +1,4 @@
-# final validation after Vitest compatibility adjustments
-name: Final Security Upgrade
+name: Final Clean Proof
 
 on:
   push:
@@ -8,41 +7,20 @@ on:
     paths:
       - .github/workflows/final-security-upgrade.yml
 
-permissions:
-  contents: write
-
 jobs:
-  upgrade-verify:
+  prove:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - name: Upgrade to patched compatible lines
-        run: |
-          npm install next@15.5.25 --save-exact
-          npm install --save-dev eslint-config-next@15.5.25 vitest@4.1.11 postcss@8.5.23 --save-exact
-          npm pkg set overrides.postcss=8.5.23
-          npm install
-          npm audit fix || true
+      - name: Install persisted lockfile exactly
+        run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: Block critical vulnerabilities anywhere
-        run: npm audit --audit-level=critical
-      - name: Block high or critical runtime vulnerabilities
-        run: npm audit --omit=dev --audit-level=high
-      - name: Persist only verified dependency changes
-        run: |
-          git config user.name "TATA House CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add package.json package-lock.json tsconfig.json
-          if git diff --cached --quiet; then
-            echo "No dependency changes"
-          else
-            git commit -m "[house-final] chore(security): atualizar dependências sem major de runtime"
-            git push
-          fi
+      - name: Audit all dependencies
+        run: npm audit
