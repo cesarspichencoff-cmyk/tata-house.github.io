@@ -1,0 +1,40 @@
+name: House 10 AI Security
+
+on:
+  push:
+    branches:
+      - feat/tata-house-10-10-ai-security-20260917
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Apply AI security patch
+        run: python scripts/house10_ai_security_patch.py
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Persist verified AI security patch
+        run: |
+          git config user.name "TATA House CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/lib/cardapio/ia-cliente.ts src/lib/cardapio/nf-leitura.ts src/lib/cardapio/cotacao.ts src/lib/cardapio/seguranca-ia.test.ts src/components/cardapio/AbaNF.tsx src/components/cardapio/AbaCotacao.tsx supabase/functions/llm/index.ts
+          if git diff --cached --quiet; then
+            echo "No AI security delta to persist"
+            exit 0
+          fi
+          git commit -m "[house-patch] security(ai): remove secrets do browser e fecha NF no edge"
+          git push origin HEAD:feat/tata-house-10-10-ai-security-20260917
