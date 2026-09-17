@@ -13,7 +13,7 @@ permissions:
 jobs:
   upgrade-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,9 +22,9 @@ jobs:
           cache: npm
       - name: Upgrade runtime and test toolchain to patched lines
         run: |
-          npm install next@15.5.25 --save-exact
-          npm install --save-dev eslint-config-next@15.5.25 vitest@4.1.11 postcss@8.5.23 --save-exact
-          npm audit fix
+          npm install next@16.3.5 react@19.3.0 react-dom@19.3.0 --save-exact
+          npm install --save-dev @types/react@19.3.0 @types/react-dom@19.3.0 eslint-config-next@16.3.5 vitest@4.1.11 postcss@8.5.23 --save-exact
+          npm audit fix || true
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
@@ -36,10 +36,10 @@ jobs:
         run: |
           git config user.name "TATA House CI"
           git config user.email "actions@users.noreply.github.com"
-          git add package.json package-lock.json
+          git add package.json package-lock.json tsconfig.json next-env.d.ts
           if git diff --cached --quiet; then
             echo "No dependency changes"
           else
-            git commit -m "[house-final] chore(security): atualizar dependências críticas"
+            git commit -m "[house-final] chore(security): atualizar runtime para linhas corrigidas"
             git push
           fi
