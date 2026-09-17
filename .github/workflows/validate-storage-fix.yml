@@ -1,0 +1,21 @@
+name: Validate storage durability fix
+
+on:
+  push:
+    branches:
+      - ci/storage-durability-validation-20260916
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
