@@ -1,0 +1,53 @@
+name: Confluencia Live Verify
+
+on:
+  push:
+    branches:
+      - feat/tata-house-live-intelligence-confluencia-20260917
+    paths:
+      - .github/workflows/confluencia-live-verify.yml
+      - scripts/confluencia_live_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded Confluencia patch
+        run: python scripts/confluencia_live_patch.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Persist only if every gate passed
+        run: |
+          git config user.name "TATA House CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            src/lib/cardapio/cotacao.ts \
+            src/components/cardapio/AbaCotacao.tsx \
+            src/lib/cardapio/planejador-multiobjetivo.ts \
+            src/lib/cardapio/planejador-multiobjetivo.test.ts \
+            src/lib/cardapio/cotacao.test.ts \
+            src/lib/cardapio/refeicoes.ts \
+            src/components/cardapio/LinhaTempoCasa.tsx \
+            src/components/cardapio/AbaGastos.tsx \
+            src/app/page.tsx
+          if git diff --cached --quiet; then
+            echo "No source changes"
+          else
+            git commit -m "feat(confluencia): tornar dados vivos e cotacao autoassimilavel"
+            git push
+          fi
