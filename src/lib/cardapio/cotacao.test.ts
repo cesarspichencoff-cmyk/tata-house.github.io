@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsearCotacao, ehRemetenteInterno, bloquearRemetente } from './cotacao';
+import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente } from './cotacao';
 
 describe('cotação — remetente interno (Erika) não é fornecedor', () => {
   it('ehRemetenteInterno reconhece a Erika em várias grafias', () => {
@@ -103,5 +103,43 @@ describe('unidade da cotação não pode inflar o custo em silêncio', () => {
     expect(abacaxi).toBeDefined();
     expect(abacaxi!.bloqueado).toBeFalsy();
     expect(abacaxi!.preco).toBeCloseTo(7.4, 2);
+  });
+});
+
+
+describe('cotação — formato estruturado e seleção dimensional segura', () => {
+  it('lê campos estruturados sem transformar metadados em produto', () => {
+    const [linha] = parsearCotacao('ID=0020 | FORNECEDOR=WG | CATEGORIA=BOVINOS | PRODUTO=Tiras de carnes | UNIDADE_PRECO=KG | PRECO=39,98 | CONSERVACAO=RF');
+    expect(linha).toBeDefined();
+    expect(linha.nome).toBe('Tiras de carnes');
+    expect(linha.marca).toBe('WG');
+    expect(linha.item).toBe('Tiras de Carne');
+    expect(linha.unid).toBe('kg');
+    expect(linha.conservacao).toBe('resfriado');
+    expect(linha.origem).toBe('estruturado');
+    expect(linha.preco).toBeCloseTo(39.98, 2);
+  });
+
+  it('ignora linha estruturada incompleta em vez de cadastrar metadata como produto', () => {
+    expect(parsearCotacao('ID=0001 | FORNECEDOR=WG | PRECO=39,98')).toHaveLength(0);
+  });
+
+  it('ignora documentação com preço de exemplo', () => {
+    expect(parsearCotacao('IMPORTANTE: exemplo de preço 39,98')).toHaveLength(0);
+  });
+
+  it('preserva RF/CG como atributo e não polui o nome canônico', () => {
+    const [linha] = parsearCotacao('Frango inteiro RF 9,98');
+    expect(linha.nome).toBe('Frango inteiro');
+    expect(linha.conservacao).toBe('resfriado');
+  });
+
+  it('oferta incompatível mais barata não substitui oferta válida', () => {
+    const linhas = parsearCotacao('ABACAXI CX 2,00\nABACAXI KG 7,40');
+    const item = agruparCotacao(linhas).casados.find((x) => x.item.toLowerCase().includes('abacaxi'));
+    expect(item).toBeDefined();
+    expect(item!.ofertas).toBe(2);
+    expect(item!.bloqueado).toBeFalsy();
+    expect(item!.preco).toBeCloseTo(7.40, 2);
   });
 });
