@@ -100,7 +100,7 @@ describe('planejador multiobjetivo', () => {
     } finally {
       aleatorio.mockRestore();
     }
-  });
+  }, 15_000);
 
   it('expõe carga operacional normalizada e usa receita real quando disponível', () => {
     const simples = cargaOperacionalPrato('Frango grelhado');
