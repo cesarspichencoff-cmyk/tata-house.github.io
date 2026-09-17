@@ -1,15 +1,10 @@
 /* =====================================================================
-   IA client-side — chama um LLM diretamente do browser.
-   Substitui a API Route /api/ia, permitindo hospedagem estática.
+   IA do TATÁ House — cliente seguro.
 
-   Provedores suportados (em ordem de prioridade), configure UM:
-     NEXT_PUBLIC_GEMINI_API_KEY     → Google Gemini (gratuito, recomendado)
-                                       chave do AI Studio (formato AIza... ou AQ...)
-                                       enviada no header x-goog-api-key
-     NEXT_PUBLIC_OPENAI_API_KEY     → OpenAI (pago)
-     NEXT_PUBLIC_ANTHROPIC_API_KEY  → Anthropic (pago)
-
-   Sem nenhuma key → retorna { offline: true } e o assistente usa regras.
+   Regra: o navegador nunca recebe chave de Gemini/Groq/OpenAI/Anthropic.
+   Toda chamada passa pela Edge Function `llm`, que guarda os secrets no
+   servidor. Se o proxy não estiver configurado ou falhar, o produto cai para
+   as regras locais e deixa isso explícito em vez de expor credenciais.
    ===================================================================== */
 
 import type { DossieIA } from './dossie';
@@ -50,60 +45,12 @@ function promptParaModo(modo: ModoIA, tarefa: string, dossie: DossieIA): string 
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Extração estruturada de conversas                                    */
-/* ------------------------------------------------------------------ */
-
 const SYSTEM_RESTRICOES = `Analise esta conversa e extraia restrições alimentares de funcionários.
 Retorne SOMENTE JSON (array, mesmo que vazio):
 [{ "nome": "Nome", "setor": "setor ou null", "turno": "almoco|jantar|ambos",
    "restricoes": [{ "tipo": "alergia|preferencia|religioso", "alimento": "alimento", "obs": "obs ou null" }] }]
 Tipos: alergia=médica/intolerância, preferencia=pessoal/não gosta, religioso=halal/kosher/crença.
 Turno padrão: "almoco". Retorne [] se nada encontrado. Não invente.`;
-
-export async function extrairRestricoesDaConversa(
-  texto: string,
-): Promise<{ nome: string; setor: string | null; turno: string; restricoes: { tipo: string; alimento: string; obs: string | null }[] }[]> {
-  // 1) Edge Function (chave no servidor) — preferida quando ativada.
-  if (iaEdgeAtivo()) {
-    try {
-      const txt = await chamarEdge('gemini', SYSTEM_RESTRICOES, texto, true);
-      const data = JSON.parse(txt || '[]');
-      return Array.isArray(data) ? data : [];
-    } catch {
-      return [];
-    }
-  }
-
-  // 2) Direto com a chave NEXT_PUBLIC.
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-  if (!apiKey) return [];
-  try {
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_RESTRICOES }] },
-          contents: [{ parts: [{ text: texto }] }],
-          generationConfig: { maxOutputTokens: 2000, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } },
-        }),
-      },
-    );
-    if (!res.ok) return [];  // silencioso — chamado em background
-    const json = await res.json();
-    const txt: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
-    const data = JSON.parse(txt);
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/* Edge Function (proxy seguro — chave fica no servidor, fora do bundle) */
-/* ------------------------------------------------------------------ */
 
 /** URL da função `llm` quando ativada (NEXT_PUBLIC_IA_EDGE=1 + Supabase). */
 function urlEdgeLLM(): string | null {
@@ -117,7 +64,7 @@ export function iaEdgeAtivo(): boolean {
   return urlEdgeLLM() !== null;
 }
 
-/** Chama a Edge Function. Lança em falha (para o chamador cair no fallback). */
+/** Chama a Edge Function. A anon/publishable key do Supabase é pública por design. */
 export async function chamarEdge(
   provider: 'gemini' | 'groq',
   system: string,
@@ -125,8 +72,9 @@ export async function chamarEdge(
   comoJson: boolean,
 ): Promise<string> {
   const fnUrl = urlEdgeLLM();
-  if (!fnUrl) throw new Error('edge desativada');
+  if (!fnUrl) throw new Error('IA segura não configurada');
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
+  if (!anon) throw new Error('Chave pública do Supabase ausente');
   const res = await fetch(fnUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${anon}`, apikey: anon },
@@ -149,123 +97,28 @@ function extrairJson(texto: string): RespostaIA {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Google Gemini — gratuito, funciona client-side                       */
-/* ------------------------------------------------------------------ */
-
-async function chamarGemini(apiKey: string, prompt: string): Promise<RespostaIA> {
-  const modelo = 'gemini-2.5-flash';
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: 800,
-          responseMimeType: 'application/json',
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
-    },
-  );
-  if (!res.ok) {
-    const corpo = await res.text().catch(() => res.statusText);
-    const ehAutenticacao = res.status === 401 || corpo.includes('UNAUTHENTICATED') || corpo.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED');
-    throw new Error(ehAutenticacao
-      ? 'Chave Gemini inválida — acesse aistudio.google.com/apikey e atualize o secret GEMINI_API_KEY no GitHub com uma chave AIza…'
-      : `Gemini ${res.status}: ${corpo}`);
+export async function extrairRestricoesDaConversa(
+  texto: string,
+): Promise<{ nome: string; setor: string | null; turno: string; restricoes: { tipo: string; alimento: string; obs: string | null }[] }[]> {
+  if (!iaEdgeAtivo()) return [];
+  try {
+    const txt = await chamarEdge('gemini', SYSTEM_RESTRICOES, texto, true);
+    const data = JSON.parse(txt || '[]');
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
   }
-  const json = await res.json();
-  const texto = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
-  return extrairJson(texto);
 }
-
-/* ------------------------------------------------------------------ */
-/* OpenAI                                                               */
-/* ------------------------------------------------------------------ */
-
-async function chamarOpenAI(apiKey: string, prompt: string): Promise<RespostaIA> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      max_tokens: 512,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: prompt },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}`);
-  const json = await res.json();
-  const conteudo = json.choices?.[0]?.message?.content ?? '{}';
-  return JSON.parse(conteudo) as RespostaIA;
-}
-
-/* ------------------------------------------------------------------ */
-/* Anthropic                                                            */
-/* ------------------------------------------------------------------ */
-
-async function chamarAnthropic(apiKey: string, prompt: string): Promise<RespostaIA> {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-allow-browser': 'true',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      system: SYSTEM,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}`);
-  const json = await res.json();
-  const texto = json.content?.[0]?.text ?? '{}';
-  return extrairJson(texto);
-}
-
-/* ------------------------------------------------------------------ */
-/* Seleção do provedor                                                  */
-/* ------------------------------------------------------------------ */
 
 export async function chamarIACliente(
   tarefa: string,
   dossie: DossieIA,
   modo: ModoIA = 'pergunta',
 ): Promise<RespostaIA> {
+  if (!iaEdgeAtivo()) return { offline: true, texto: '' };
   const prompt = promptParaModo(modo, tarefa, dossie);
-
-  // 1) Edge Function (chave no servidor) — preferida quando ativada.
-  if (iaEdgeAtivo()) {
-    try {
-      return extrairJson(await chamarEdge('gemini', SYSTEM, prompt, true));
-    } catch {
-      /* função indisponível: tenta o caminho direto abaixo */
-    }
-  }
-
-  // 2) Direto com chaves NEXT_PUBLIC (modo atual, exposto no client).
-  const geminiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-  const openaiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
-  const anthropicKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
-
-  if (!geminiKey && !openaiKey && !anthropicKey) {
-    return { offline: true, texto: '' };
-  }
-
   try {
-    if (geminiKey) return await chamarGemini(geminiKey, prompt);
-    if (openaiKey) return await chamarOpenAI(openaiKey, prompt);
-    return await chamarAnthropic(anthropicKey!, prompt);
+    return extrairJson(await chamarEdge('gemini', SYSTEM, prompt, true));
   } catch {
     return { offline: true, texto: '' };
   }
