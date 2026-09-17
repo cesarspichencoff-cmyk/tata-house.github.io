@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { DIAS_SEMANA, formatarReais } from '@/lib/cardapio/motor';
 import {
   aplicarCenarioAoEstado,
-  gerarCenariosGovernanca,
   type CenarioGovernanca,
 } from '@/lib/cardapio/governanca-candidatos';
+import { gerarCenariosMultiobjetivo } from '@/lib/cardapio/planejador-multiobjetivo';
 import type { Aceitacao, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
@@ -182,7 +182,7 @@ export function CenariosGovernanca({
   const [mensagem, setMensagem] = useState('');
 
   const gerar = () => {
-    const novos = gerarCenariosGovernanca({
+    const novos = gerarCenariosMultiobjetivo({
       estado,
       precos,
       estimativas,
@@ -202,8 +202,8 @@ export function CenariosGovernanca({
     setAplicado(null);
     setMensagem(
       novos.length === 3
-        ? 'Três estratégias prontas. Compare antes de mudar o rascunho.'
-        : `O motor conseguiu formar ${novos.length} cenário(s) válido(s) com os dados carregados.`,
+        ? 'Três estratégias multiobjetivo prontas. Compare antes de mudar o rascunho.'
+        : `O planejador conseguiu formar ${novos.length} cenário(s) válido(s) com os dados carregados.`,
     );
   };
 
@@ -229,10 +229,10 @@ export function CenariosGovernanca({
     <section data-testid="comparador-cenarios" className="rounded-3xl border border-carvao-100 bg-gradient-to-b from-white to-areia-50/50 p-4 shadow-sm dark:border-carvao-800 dark:from-carvao-900 dark:to-carvao-950/40 md:p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="max-w-2xl">
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Compare antes de montar</p>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Planejamento multiobjetivo</p>
           <h2 className="mt-1 font-display text-xl font-bold tracking-tight">Compare 3 estratégias para a mesma semana</h2>
           <p className="mt-2 text-sm leading-6 text-texto-suave">
-            Compare propostas com custo, tendência de preço, restrições, desperdício, demanda, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
+            O novo motor não sorteia semanas. Ele compara custo por ingrediente, aceitação, estoque, desperdício, demanda, repetição, nutrição, restrições e carga operacional antes de propor cada cenário.
           </p>
         </div>
         <button
@@ -241,7 +241,7 @@ export function CenariosGovernanca({
           onClick={gerar}
           className="shrink-0 rounded-2xl bg-brand-600 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-brand-700"
         >
-          {cenarios.length ? 'Gerar 3 novos cenários' : 'Comparar 3 cenários'}
+          {cenarios.length ? 'Recalcular 3 cenários' : 'Comparar 3 cenários'}
         </button>
       </div>
 
@@ -261,7 +261,7 @@ export function CenariosGovernanca({
       )}
 
       <div className="mt-4 rounded-2xl border border-dashed border-carvao-200 px-4 py-3 text-xs leading-5 text-texto-suave dark:border-carvao-700">
-        Aplicar altera apenas esta <strong>proposta</strong>. Nada é publicado sem sua revisão e aprovação.
+        O motor só propõe. Aplicar altera esta <strong>proposta</strong>; nada é publicado sem revisão e decisão humana.
       </div>
     </section>
   );
