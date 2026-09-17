@@ -91,7 +91,7 @@ export function registrarVersao(
   anterior: EstadoSemana | null | undefined,
   origem: VersaoSemana['origem'],
 ): void {
-  if (typeof window === 'undefined' || !temConteudo(anterior)) return;
+  if (typeof window === 'undefined' || !anterior || !temConteudo(anterior)) return;
   try {
     const versoes = lerVersoes(semanaId);
     const leve = estadoParaHistorico(anterior);
