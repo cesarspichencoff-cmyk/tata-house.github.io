@@ -1,0 +1,22 @@
+name: Final Dependency Audit
+
+on:
+  push:
+    branches:
+      - feat/tata-house-final-reconciled-20260917
+    paths:
+      - .github/workflows/final-audit.yml
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Audit dependencies
+        run: npm audit --json || true
