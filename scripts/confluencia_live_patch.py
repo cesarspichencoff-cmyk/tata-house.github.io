@@ -93,8 +93,21 @@ export function sugerirItemCotacao(
   nome: string,
   itensExtras?: Record<string, { n: string; u: string }>,
 ): SugestaoItemCotacao {
-  const n = tokensComparaveis(nome).join(' ');
+  const tokensNome = tokensComparaveis(nome);
+  const n = tokensNome.join(' ');
   if (!n) return { item: null, unid: null, confianca: 0, motivo: 'sem-match' };
+
+  // Item extra já aprendido pela operação tem prioridade quando o nome canônico
+  // (>=2 tokens) está integralmente contido no texto do fornecedor e o match é único.
+  const setNome = new Set(tokensNome);
+  const extrasCompativeis = Object.values(itensExtras ?? {}).filter((extra) => {
+    const et = tokensComparaveis(extra.n);
+    return et.length >= 2 && et.every((t) => setNome.has(t));
+  });
+  if (extrasCompativeis.length === 1) {
+    const extra = extrasCompativeis[0];
+    return { item: extra.n, unid: extra.u || null, confianca: 0.97, motivo: 'tokens' };
+  }
 
   for (const [re, alvo] of ALIASES) {
     if (!re.test(n)) continue;

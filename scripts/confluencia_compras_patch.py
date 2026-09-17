@@ -52,7 +52,20 @@ replace_once(
 )
 
 
-# 2) Memória de COMPOSIÇÃO. O app já aprendia quantidade; agora aprende também
+# 2) Congelamento retrocompatível: listas já persistidas NÃO entram automaticamente
+# na nova composição. Só documentos novos, criados após esta evolução, recebem v2.
+replace_once(
+    tipos,
+    "  versao: 1;\n",
+    "  versao: 1;\n  /** v2 = composição aprendida habilitada somente para listas novas; ausente = lista legada congelada. */\n  listaInteligenciaVersao?: 2;\n",
+)
+replace_once(
+    'src/lib/cardapio/estado.tsx',
+    "    versao: 1,\n",
+    "    versao: 1,\n    // Opt-in apenas em semanas NOVAS. Semanas já salvas não têm este campo e permanecem congeladas.\n    listaInteligenciaVersao: 2,\n",
+)
+
+# 3) Memória de COMPOSIÇÃO. O app já aprendia quantidade; agora aprende também
 # o que a operação remove repetidamente e o que acrescenta repetidamente.
 aprendizado = r'''import { arredondar, linhasDoDia, normalizar, type LinhaCompra, type OpcoesLista } from './motor';
 import type { DiaCardapio, EstadoSemana } from './tipos';
@@ -284,6 +297,10 @@ export function aplicarMemoriaComposicaoCompras(
   diaIdx: number,
   memoria: MemoriaComposicaoCompras,
 ): LinhaCompra[] {
+  // Regra de preservação: qualquer semana criada antes da inteligência v2
+  // não recebe alteração automática de composição. Ela continua exatamente
+  // com a lista que o motor legado + ajustes já produziam.
+  if (estado.listaInteligenciaVersao !== 2) return linhasBase;
   const dia = estado.dias[diaIdx];
   if (!dia?.principal) return linhasBase;
   const decisao = resolverAprendizadoCompra(dia, memoria);
@@ -474,6 +491,7 @@ function estadoSemana(args: {
   }
   return {
     versao: 1,
+    listaInteligenciaVersao: 2,
     orcamento: null,
     dias,
     etapa: 'concluido',
@@ -496,6 +514,22 @@ const operacional = (item = 'Tomate'): LinhaCompra => ({
 });
 
 describe('aprendizado de composição da lista de compras', () => {
+  it('lista já existente permanece congelada mesmo quando há aprendizado forte', () => {
+    const legado = estadoSemana();
+    delete legado.listaInteligenciaVersao;
+    const memoria = construirMemoriaComposicaoCompras([
+      { semanaId: '2026-S20', estado: estadoSemana({ removidos: ['Tomate'] }) },
+      { semanaId: '2026-S21', estado: estadoSemana({ removidos: ['Tomate'] }) },
+      { semanaId: '2026-S22', estado: estadoSemana({ manuais: [{ item: 'Banana', unid: 'un', qtd: 10 }] }) },
+      { semanaId: '2026-S23', estado: estadoSemana({ manuais: [{ item: 'Banana', unid: 'un', qtd: 10 }] }) },
+    ]);
+    const base = [fraca()];
+    const antes = JSON.stringify(base);
+    const linhas = aplicarMemoriaComposicaoCompras(base, legado, 0, memoria);
+    expect(JSON.stringify(linhas)).toBe(antes);
+    expect(linhas.map((x) => x.chave)).toEqual(['tomate']);
+  });
+
   it('uma correção isolada não vira regra automática', () => {
     const atual = estadoSemana();
     const memoria = construirMemoriaComposicaoCompras([

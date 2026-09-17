@@ -48,6 +48,7 @@ jobs:
             src/components/cardapio/LinhaTempoCasa.tsx \
             src/components/cardapio/AbaGastos.tsx \
             src/lib/cardapio/tipos.ts \
+            src/lib/cardapio/estado.tsx \
             src/lib/cardapio/aprendizado-compras.ts \
             src/lib/cardapio/aprendizado-compras.test.ts \
             src/lib/cardapio/motor.ts \
