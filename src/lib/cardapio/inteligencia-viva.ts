@@ -33,7 +33,10 @@ export interface DriverGerencial {
 export interface InteligenciaViva {
   semanaId: string;
   refeicoesPrevistas: number;
+  refeicoesPrevistasComparaveis: number | null;
   refeicoesReais: number | null;
+  diasComReal: number;
+  coberturaDemandaPct: number;
   erroDemanda: number | null;
   erroDemandaPct: number | null;
   custoPlanejado: ValorComEvidencia;
@@ -44,6 +47,8 @@ export interface InteligenciaViva {
   estoqueValorizado: ValorComEvidencia;
   economiaCotacao: ValorComEvidencia;
   pressaoPreco: ValorComEvidencia;
+  diferencaCompraConsumo: ValorComEvidencia;
+  diferencaNfPlanejado: ValorComEvidencia;
   aceitacaoMedia: number | null;
   coberturaAceitacaoPct: number;
   drivers: DriverGerencial[];
@@ -227,8 +232,17 @@ function aceitacaoSemana(entrada: EntradaInteligenciaViva): { media: number | nu
 export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): InteligenciaViva {
   const reaisDia = refeicoesReaisPorDia(entrada);
   const previstas = entrada.estado.dias.reduce((s, d) => s + Math.max(0, d.pessoas), 0);
-  const diasComReal = reaisDia.filter((n): n is number => n != null);
-  const reais = diasComReal.length > 0 ? diasComReal.reduce((s, n) => s + n, 0) : null;
+  const indicesComReal = reaisDia
+    .map((n, i) => n == null ? -1 : i)
+    .filter((i) => i >= 0);
+  const diasComReal = indicesComReal.length;
+  const reais = diasComReal > 0
+    ? indicesComReal.reduce((s, i) => s + (reaisDia[i] ?? 0), 0)
+    : null;
+  const previstasComparaveis = diasComReal > 0
+    ? indicesComReal.reduce((s, i) => s + Math.max(0, entrada.estado.dias[i]?.pessoas ?? 0), 0)
+    : null;
+  const coberturaDemandaPct = pct(diasComReal, entrada.estado.dias.length);
 
   let planejado = 0;
   let itensPlanejados = 0;
@@ -265,8 +279,10 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
   const oportunidade = oportunidadeCotacao(entrada);
   const pressao = pressaoDePreco(entrada);
   const aceit = aceitacaoSemana(entrada);
-  const erroDemanda = reais == null ? null : reais - previstas;
-  const erroDemandaPct = erroDemanda == null || previstas <= 0 ? null : (erroDemanda / previstas) * 100;
+  const erroDemanda = reais == null || previstasComparaveis == null ? null : reais - previstasComparaveis;
+  const erroDemandaPct = erroDemanda == null || previstasComparaveis == null || previstasComparaveis <= 0
+    ? null
+    : (erroDemanda / previstasComparaveis) * 100;
 
   const custoPlanejado: ValorComEvidencia = {
     valor: itensComPreco > 0 ? arred(planejado) : null,
@@ -317,6 +333,24 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
     descricao: 'efeito aproximado de aumentos recentes de preço sobre as quantidades planejadas',
   };
 
+  const diferencaCompraConsumo: ValorComEvidencia = {
+    valor: comprasRegistradas.valor != null && consumoEstimado.valor != null
+      ? arred(comprasRegistradas.valor - consumoEstimado.valor)
+      : null,
+    classe: comprasRegistradas.valor != null && consumoEstimado.valor != null ? 'estimado' : 'indisponivel',
+    coberturaPct: Math.min(comprasRegistradas.coberturaPct, consumoEstimado.coberturaPct),
+    descricao: 'compras registradas − consumo estimado; é valor a explicar, não perda comprovada (pode incluir estoque e diferença de período)',
+  };
+
+  const diferencaNfPlanejado: ValorComEvidencia = {
+    valor: notasFiscais.valor != null && custoPlanejado.valor != null
+      ? arred(notasFiscais.valor - custoPlanejado.valor)
+      : null,
+    classe: notasFiscais.valor != null && custoPlanejado.valor != null ? 'estimado' : 'indisponivel',
+    coberturaPct: Math.min(notasFiscais.coberturaPct, custoPlanejado.coberturaPct),
+    descricao: 'notas fiscais da semana − custo planejado; compras podem abastecer outras semanas, então a diferença não é classificada como desperdício',
+  };
+
   const drivers: DriverGerencial[] = [
     {
       id: 'desperdicio', titulo: 'Valor associado à sobra', valor: desperdicio.valor, unidade: 'R$', classe: desperdicio.classe,
@@ -345,8 +379,11 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
   ];
 
   const alertas: string[] = [];
-  if (erroDemandaPct != null && erroDemandaPct <= -10) alertas.push(`A demanda real está ${Math.abs(Math.round(erroDemandaPct))}% abaixo do planejado; revise produção e compra antes de repetir o padrão.`);
-  if (erroDemandaPct != null && erroDemandaPct >= 10) alertas.push(`A demanda real está ${Math.round(erroDemandaPct)}% acima do planejado; há risco de falta ou compra emergencial.`);
+  if (diasComReal > 0 && diasComReal < entrada.estado.dias.length) {
+    alertas.push(`Demanda comparada em ${diasComReal}/7 dia(s); os dias sem contagem real não entram no desvio.`);
+  }
+  if (erroDemandaPct != null && erroDemandaPct <= -10) alertas.push(`Nos dias já medidos, a demanda real está ${Math.abs(Math.round(erroDemandaPct))}% abaixo do planejado; revise produção e compra antes de repetir o padrão.`);
+  if (erroDemandaPct != null && erroDemandaPct >= 10) alertas.push(`Nos dias já medidos, a demanda real está ${Math.round(erroDemandaPct)}% acima do planejado; há risco de falta ou compra emergencial.`);
   if (desperdicio.valor != null && desperdicio.valor > 0) alertas.push(`${desperdicio.coberturaPct}% dos registros de sobra já têm valor financeiro estimável.`);
   if (economiaCotacao.valor != null && economiaCotacao.valor >= 20) alertas.push(`Há cerca de R$ ${economiaCotacao.valor.toFixed(2).replace('.', ',')} de economia potencial nas ofertas comparáveis desta semana.`);
   if (custoPlanejado.coberturaPct < 80) alertas.push(`Só ${custoPlanejado.coberturaPct}% dos itens planejados têm preço; trate o custo total como incompleto.`);
@@ -354,7 +391,10 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
   return {
     semanaId: entrada.semanaId,
     refeicoesPrevistas: previstas,
+    refeicoesPrevistasComparaveis: previstasComparaveis,
     refeicoesReais: reais,
+    diasComReal,
+    coberturaDemandaPct,
     erroDemanda,
     erroDemandaPct,
     custoPlanejado,
@@ -365,6 +405,8 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
     estoqueValorizado,
     economiaCotacao,
     pressaoPreco,
+    diferencaCompraConsumo,
+    diferencaNfPlanejado,
     aceitacaoMedia: aceit.media,
     coberturaAceitacaoPct: pct(aceit.cobertos, aceit.pratos),
     drivers,

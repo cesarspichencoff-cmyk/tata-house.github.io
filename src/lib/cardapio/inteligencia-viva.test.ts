@@ -55,12 +55,15 @@ describe('inteligência gerencial viva', () => {
     expect(r.notasFiscais.coberturaPct).toBe(100);
   });
 
-  it('compara demanda real disponível com a previsão sem inventar dias ausentes', () => {
+  it('compara demanda somente nos dias com realizado e explicita cobertura parcial', () => {
     const r = construirInteligenciaViva(entrada());
     expect(r.refeicoesPrevistas).toBe(70);
+    expect(r.refeicoesPrevistasComparaveis).toBe(20);
     expect(r.refeicoesReais).toBe(17);
-    expect(r.erroDemanda).toBe(-53);
-    expect(r.erroDemandaPct).toBeCloseTo(-75.714, 2);
+    expect(r.diasComReal).toBe(2);
+    expect(r.coberturaDemandaPct).toBe(29);
+    expect(r.erroDemanda).toBe(-3);
+    expect(r.erroDemandaPct).toBeCloseTo(-15, 2);
   });
 
   it('não transforma sobra sem base culinária em dinheiro fictício', () => {

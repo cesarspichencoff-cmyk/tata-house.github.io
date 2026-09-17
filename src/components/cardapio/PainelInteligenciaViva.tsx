@@ -60,11 +60,16 @@ export function PainelInteligenciaViva({ inteligencia }: { inteligencia: Intelig
           <div className="shrink-0 rounded-2xl bg-carvao-50 px-3 py-2 text-right dark:bg-carvao-800">
             <p className="text-[10px] font-bold uppercase tracking-wider text-texto-suave">Demanda</p>
             <p className="text-sm font-extrabold tabular-nums">
-              {inteligencia.refeicoesReais == null ? 'sem realizado' : `${inteligencia.refeicoesReais} / ${inteligencia.refeicoesPrevistas}`}
+              {inteligencia.refeicoesReais == null
+                ? 'sem realizado'
+                : `${inteligencia.refeicoesReais} / ${inteligencia.refeicoesPrevistasComparaveis ?? '—'}`}
             </p>
+            {inteligencia.refeicoesReais != null && (
+              <p className="text-[10px] text-texto-suave">{inteligencia.diasComReal}/7 dias medidos · {inteligencia.coberturaDemandaPct}% cobertura</p>
+            )}
             {inteligencia.erroDemandaPct != null && (
               <p className={`text-[11px] font-semibold ${Math.abs(inteligencia.erroDemandaPct) >= 10 ? 'text-ouro-700 dark:text-ouro-300' : 'text-texto-suave'}`}>
-                {inteligencia.erroDemandaPct > 0 ? '+' : ''}{Math.round(inteligencia.erroDemandaPct)}% vs planejado
+                {inteligencia.erroDemandaPct > 0 ? '+' : ''}{Math.round(inteligencia.erroDemandaPct)}% nos dias comparáveis
               </p>
             )}
           </div>
@@ -82,6 +87,15 @@ export function PainelInteligenciaViva({ inteligencia }: { inteligencia: Intelig
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
           <Dinheiro titulo="Pressão de alta de preços" dado={inteligencia.pressaoPreco} />
           <Dinheiro titulo="Economia potencial nas ofertas" dado={inteligencia.economiaCotacao} />
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-carvao-100 bg-white/70 p-3 dark:border-carvao-800 dark:bg-carvao-900/50">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-texto-suave">Reconciliação financeira</p>
+          <p className="mt-1 text-xs leading-5 text-texto-suave">Diferença não significa perda. O House mostra o valor que ainda precisa ser explicado por consumo, estoque ou diferença de período.</p>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Dinheiro titulo="Compra − consumo" dado={inteligencia.diferencaCompraConsumo} />
+            <Dinheiro titulo="NF − planejado" dado={inteligencia.diferencaNfPlanejado} />
+          </div>
         </div>
       </div>
 
