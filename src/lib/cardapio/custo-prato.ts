@@ -1,10 +1,11 @@
 /* =====================================================================
-   Motor de custo real por prato — cruza ingredientes do dados.json
+   Motor de custo real por prato — cruza ingredientes operacionais/receitas
    com a mesma resolução canônica de preços usada pelo restante do House.
    ===================================================================== */
 
 import { DADOS, converterParaUnidadeBase, normalizar } from './motor';
 import { resolverPreco, type TipoPreco } from './precos';
+import { receitaDoPrato } from './receitas';
 import type { DiaCardapio } from './tipos';
 
 export interface IngredienteCusto {
@@ -30,8 +31,9 @@ export interface CustoPorcao {
   pessoas: number;
   /** 0–1: proporção de ingredientes com alguma referência de preço resolvida */
   cobertura: number;
-  /** true = dados de mapa individual; false = inferido de combo */
+  /** Compatibilidade histórica: true quando há fonte estruturada específica do prato. */
   deMapa: boolean;
+  fonteDados: 'mapa' | 'receita' | 'combo';
 }
 
 /* ------------------------------------------------------------------ */
@@ -55,39 +57,74 @@ function unidadePreco(unid: string): string {
   return unid;
 }
 
-function calcularIngredientes(
+function resolverIngrediente(
+  item: string,
+  qtd: number,
+  unid: string,
+  precos: Record<string, number>,
+  estimativas: Record<string, number>,
+): IngredienteCusto {
+  const norm = normalizar(item);
+  // Fonte única de verdade para preço: cotação real → histórico → estimativa
+  // → ingrediente-base. A cotação aplicada a um item canônico passa, portanto,
+  // a alimentar também a receita que referencia esse mesmo ingrediente.
+  const resolvido = resolverPreco(norm, precos, estimativas);
+  const precoUnit = resolvido.valor;
+  return {
+    item: NOME_ORIGINAL.get(norm) ?? item,
+    norm,
+    qtd,
+    unid,
+    unidPreco: unidadePreco(unid),
+    precoUnit,
+    custo: precoUnit * converterParaUnidadeBase(qtd, unid),
+    temPreco: resolvido.tipo !== 'sem' && precoUnit > 0,
+    origemPreco: resolvido.tipo,
+  };
+}
+
+function calcularIngredientesOperacionais(
   itens: { i: string; q: number; u: string | null }[],
   precos: Record<string, number>,
   estimativas: Record<string, number>,
   escala: number,
 ): IngredienteCusto[] {
-  return itens.map((it) => {
-    const itNorm = normalizar(it.i);
-    const qtd = it.q * escala;
-    const unid = it.u ?? 'un';
-    // Fonte única de verdade para preço: cotação real → histórico → estimativa
-    // → ingrediente-base. Assim "Tiras de Carne", aliases e preparos resolvem
-    // da mesma forma no cardápio, na lista e no custo por prato.
-    const resolvido = resolverPreco(itNorm, precos, estimativas);
-    const precoUnit = resolvido.valor;
-    const qtdBase = converterParaUnidadeBase(qtd, unid);
-    return {
-      item: NOME_ORIGINAL.get(itNorm) ?? it.i,
-      norm: itNorm,
-      qtd,
-      unid,
-      unidPreco: unidadePreco(unid),
-      precoUnit,
-      custo: precoUnit * qtdBase,
-      temPreco: resolvido.tipo !== 'sem' && precoUnit > 0,
-      origemPreco: resolvido.tipo,
-    };
-  });
+  return itens.map((it) => resolverIngrediente(
+    it.i,
+    it.q * escala,
+    it.u ?? 'un',
+    precos,
+    estimativas,
+  ));
+}
+
+function resultado(
+  prato: string,
+  categoria: string,
+  pessoas: number,
+  ingredientes: IngredienteCusto[],
+  fonteDados: CustoPorcao['fonteDados'],
+): CustoPorcao {
+  const custoTotal = ingredientes.reduce((s, i) => s + i.custo, 0);
+  const comPreco = ingredientes.filter((i) => i.temPreco).length;
+  return {
+    prato,
+    norm: normalizar(prato),
+    categoria,
+    ingredientes,
+    custoTotal,
+    custoPorcao: custoTotal / pessoas,
+    pessoas,
+    cobertura: ingredientes.length > 0 ? comPreco / ingredientes.length : 0,
+    deMapa: fonteDados !== 'combo',
+    fonteDados,
+  };
 }
 
 /**
  * Calcula o custo por porção de um prato, escalado para `pessoas`.
- * Retorna null quando não há dados de ingredientes no sistema.
+ * Ordem de ingredientes: mapa operacional específico → receita estruturada →
+ * combo histórico. Preço é sempre resolvido pela cadeia canônica do House.
  */
 export function calcularCustoPrato(
   prato: string,
@@ -102,23 +139,33 @@ export function calcularCustoPrato(
 
   const itensMapas = MAPA_IDX.get(norm);
   if (itensMapas && itensMapas.length > 0) {
-    const ingredientes = calcularIngredientes(itensMapas, precos, estimativas, escala);
-    const custoTotal = ingredientes.reduce((s, i) => s + i.custo, 0);
-    const comPreco = ingredientes.filter((i) => i.temPreco).length;
-    return {
+    return resultado(
       prato,
-      norm,
       categoria,
-      ingredientes,
-      custoTotal,
-      custoPorcao: custoTotal / pessoas,
       pessoas,
-      cobertura: itensMapas.length > 0 ? comPreco / itensMapas.length : 0,
-      deMapa: true,
-    };
+      calcularIngredientesOperacionais(itensMapas, precos, estimativas, escala),
+      'mapa',
+    );
   }
 
-  // Fallback: procura em combo onde este prato aparece (qualquer coluna)
+  // A biblioteca culinária é a segunda fonte. Isso fecha a cadeia
+  // cotação → ingrediente canônico → receita, inclusive para pratos novos que
+  // ainda não possuem mapa/combo histórico em dados.json.
+  const receita = receitaDoPrato(prato);
+  if (receita?.ingredientes?.length) {
+    const ingredientes = receita.ingredientes
+      .filter((ing) => !ing.opcional || resolverPreco(normalizar(ing.item), precos, estimativas).tipo !== 'sem')
+      .map((ing) => resolverIngrediente(
+        ing.item,
+        ing.porPessoa * pessoas,
+        ing.unid,
+        precos,
+        estimativas,
+      ));
+    if (ingredientes.length > 0) return resultado(prato, categoria, pessoas, ingredientes, 'receita');
+  }
+
+  // Último fallback: combo onde este prato aparece (qualquer coluna).
   const combo = DADOS.combos.find(
     (c) =>
       normalizar(c.p ?? '') === norm ||
@@ -129,20 +176,13 @@ export function calcularCustoPrato(
   );
   if (!combo || combo.itens.length === 0) return null;
 
-  const ingredientes = calcularIngredientes(combo.itens, precos, estimativas, escala);
-  const custoTotal = ingredientes.reduce((s, i) => s + i.custo, 0);
-  const comPreco = ingredientes.filter((i) => i.temPreco).length;
-  return {
+  return resultado(
     prato,
-    norm,
     categoria,
-    ingredientes,
-    custoTotal,
-    custoPorcao: custoTotal / pessoas,
     pessoas,
-    cobertura: combo.itens.length > 0 ? comPreco / combo.itens.length : 0,
-    deMapa: false,
-  };
+    calcularIngredientesOperacionais(combo.itens, precos, estimativas, escala),
+    'combo',
+  );
 }
 
 /** Calcula custo de todos os pratos distintos de uma semana, sem repetir. */
@@ -152,7 +192,7 @@ export function calcularCustosSemana(
   estimativas: Record<string, number> = {},
 ): CustoPorcao[] {
   const vistos = new Set<string>();
-  const resultado: CustoPorcao[] = [];
+  const resultadoSemana: CustoPorcao[] = [];
 
   const CATEGORIAS: [keyof DiaCardapio, string][] = [
     ['principal', 'Principal'],
@@ -170,9 +210,9 @@ export function calcularCustosSemana(
       if (vistos.has(norm)) return;
       vistos.add(norm);
       const custo = calcularCustoPrato(prato, cat, precos, dia.pessoas, estimativas);
-      if (custo) resultado.push(custo);
+      if (custo) resultadoSemana.push(custo);
     });
   });
 
-  return resultado.sort((a, b) => b.custoPorcao - a.custoPorcao);
+  return resultadoSemana.sort((a, b) => b.custoPorcao - a.custoPorcao);
 }
