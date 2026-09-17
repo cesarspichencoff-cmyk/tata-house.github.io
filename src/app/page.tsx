@@ -15,7 +15,6 @@ import { formatarReais } from '@/lib/cardapio/motor';
    primeiro paint. */
 import { AbaAgora } from '@/components/cardapio/AbaAgora';
 import { BriefingCard } from '@/components/cardapio/BriefingCard';
-import { PainelDiretor } from '@/components/cardapio/PainelDiretor';
 
 /* Demais abas — carregadas sob demanda (code-splitting). Cada uma vira um
    chunk separado, baixado só quando o usuário abre aquela aba. Isso tira do
@@ -48,7 +47,6 @@ const AbaCustoPrato = dynamic(() => import('@/components/cardapio/AbaCustoPrato'
 const AbaFornecedorIntel = dynamic(() => import('@/components/cardapio/AbaFornecedorIntel').then((m) => ({ default: m.AbaFornecedorIntel })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const AbaPedido = dynamic(() => import('@/components/cardapio/AbaPedido').then((m) => ({ default: m.AbaPedido })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const CardapioOrientadoDados = dynamic(() => import('@/components/cardapio/CardapioOrientadoDados').then((m) => ({ default: m.CardapioOrientadoDados })), { ssr: false, loading: () => <Carregando h="h-64" /> });
-const CopilotoSemana = dynamic(() => import('@/components/cardapio/CopilotoSemana').then((m) => ({ default: m.CopilotoSemana })), { ssr: false, loading: () => null });
 const AbaGastos = dynamic(() => import('@/components/cardapio/AbaGastos').then((m) => ({ default: m.AbaGastos })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 import {
   deslocarSemana,
@@ -815,21 +813,6 @@ export default function PaginaCardapios() {
             {/* ── INÍCIO ────────────────────────────────────── */}
             {aba === 'agora' && (
               <div className="space-y-4">
-                {/* Painel do Diretor — leitura de 5s, só para gestão */}
-                {(papel === 'gestor' || papel === 'administrador') && (
-                  <>
-                    <PainelDiretor
-                      nome={perfil?.rotulo ?? 'Gestor'}
-                      precos={precos}
-                      historico={historico}
-                      fornecedores={fornecedores}
-                      perfis={perfisFornecedores}
-                      aceitacao={aceitacao}
-                      estoque={estoque}
-                    />
-                    <div className="h-px bg-gradient-to-r from-transparent via-carvao-200 to-transparent dark:via-carvao-700" />
-                  </>
-                )}
                 <BriefingCard
                   estado={estado}
                   semanaId={semanaId}
@@ -840,16 +823,6 @@ export default function PaginaCardapios() {
                   fornecedores={fornecedores}
                   onOpenIA={() => setIaAberta(true)}
                   nomeUsuario={perfil?.rotulo}
-                />
-                {/* Copiloto — o que fazer nesta semana, com número. Fica no
-                    Início de propósito: escondido numa aba de painel flutuante
-                    ninguém via, e o app parecia não ter mudado. */}
-                <CopilotoSemana
-                  estado={estado}
-                  semanaId={semanaId}
-                  precos={precos}
-                  estimativas={estimativas}
-                  onAbrirTudo={() => setIaAberta(true)}
                 />
 
                 <AbaAgora
@@ -1081,7 +1054,7 @@ export default function PaginaCardapios() {
                 {/* sub-abas por TEMA — navegação por assunto, não dump vertical */}
                 <div className="flex gap-1 overflow-x-auto rounded-2xl bg-carvao-100 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:bg-carvao-800">
                   {([
-                    { id: 'gerencial',    rotulo: 'Visão geral',   curto: 'Visão' },
+                    { id: 'gerencial',    rotulo: 'Inteligência viva', curto: 'Viva' },
                     { id: 'custos',       rotulo: 'Custos',         curto: 'Custos' },
                     { id: 'rankings',     rotulo: 'DNA & Rankings', curto: 'DNA' },
                     { id: 'previsao',     rotulo: 'Previsão',       curto: 'Prev.' },
@@ -1103,6 +1076,10 @@ export default function PaginaCardapios() {
                     </button>
                   ))}
                 </div>
+
+                <p className="text-xs leading-5 text-texto-suave">
+                  Atualiza com a operação: compras, notas fiscais, refeições, estoque, desperdício, preços, ofertas e aceitação entram na leitura sem precisar gerar um relatório novo.
+                </p>
 
                 {abaRelatorios === 'gerencial' && (
                   <CentralGerencial
