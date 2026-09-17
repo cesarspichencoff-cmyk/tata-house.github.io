@@ -6,6 +6,7 @@ import { Botao, Cartao, EstadoVazio, Kpi, Pilula, Secao, estiloInput, estiloRotu
 import { DIAS_SEMANA, formatarQtd, formatarReais } from '@/lib/cardapio/motor';
 import { RadarDesperdicio } from '@/components/cardapio/RadarDesperdicio';
 import { estimarValorDesperdicio } from '@/lib/cardapio/inteligencia-viva';
+import { resumirDesperdicioPorUnidade } from '@/lib/cardapio/desperdicio-metricas';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
 import type { EstadoSemana, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
@@ -40,19 +41,32 @@ export function AbaDesperdicio({
     return mapa;
   }, [registros, estado, precos, estimativas]);
 
-  const totalSobra = registros.reduce((a, r) => a + Math.max(0, r.produzido - r.consumido), 0);
-  const totalProduzido = registros.reduce((a, r) => a + r.produzido, 0);
-  const taxa = totalProduzido > 0 ? totalSobra / totalProduzido : 0;
+  const resumoUnidades = useMemo(() => resumirDesperdicioPorUnidade(registros), [registros]);
+  const partesSobra = [
+    resumoUnidades['porções'].registros > 0 ? `${formatarQtd(resumoUnidades['porções'].sobra)} porções` : null,
+    resumoUnidades.kg.registros > 0 ? `${formatarQtd(resumoUnidades.kg.sobra)} kg` : null,
+  ].filter(Boolean) as string[];
+  const sobraRotulo = partesSobra.length > 0 ? partesSobra.join(' · ') : '—';
+
+  const partesTaxa = [
+    resumoUnidades['porções'].taxa != null ? `${Math.round(resumoUnidades['porções'].taxa * 100)}% porções` : null,
+    resumoUnidades.kg.taxa != null ? `${Math.round(resumoUnidades.kg.taxa * 100)}% kg` : null,
+  ].filter(Boolean) as string[];
+  const taxaRotulo = partesTaxa.length > 0 ? partesTaxa.join(' · ') : '—';
+  const taxaCritica = [resumoUnidades['porções'].taxa, resumoUnidades.kg.taxa]
+    .filter((v): v is number => v != null)
+    .some((v) => v > 0.1);
+
   const valorados = registros.filter((r) => valores.get(r.id)?.valor != null);
   const totalCusto = valorados.reduce((a, r) => a + (valores.get(r.id)?.valor ?? 0), 0);
   const coberturaValor = registros.length > 0 ? Math.round((valorados.length / registros.length) * 100) : 0;
 
   const porPrato = useMemo(() => {
-    const m = new Map<string, { prato: string; sobra: number; custo: number; valorados: number }>();
+    const m = new Map<string, { prato: string; unid: RegistroDesperdicio['unid']; sobra: number; custo: number; valorados: number }>();
     registros.forEach((r) => {
-      const k = r.prato.toLowerCase();
-      const prev = m.get(k) ?? { prato: r.prato, sobra: 0, custo: 0, valorados: 0 };
-      prev.sobra += Math.max(0, r.produzido - r.consumido);
+      const k = `${r.prato.toLowerCase()}::${r.unid}`;
+      const prev = m.get(k) ?? { prato: r.prato, unid: r.unid, sobra: 0, custo: 0, valorados: 0 };
+      prev.sobra += Math.max(0, r.produzido - Math.min(r.consumido, r.produzido));
       const valor = valores.get(r.id)?.valor;
       if (valor != null) {
         prev.custo += valor;
@@ -60,7 +74,11 @@ export function AbaDesperdicio({
       }
       m.set(k, prev);
     });
-    return Array.from(m.values()).sort((a, b) => b.sobra - a.sobra);
+    return Array.from(m.values()).sort((a, b) => {
+      if (a.valorados > 0 || b.valorados > 0) return b.custo - a.custo;
+      if (a.unid === b.unid) return b.sobra - a.sobra;
+      return a.prato.localeCompare(b.prato);
+    });
   }, [registros, valores]);
 
   const removerComUndo = (r: RegistroDesperdicio) => {
@@ -103,20 +121,20 @@ export function AbaDesperdicio({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-3">
-        <Kpi rotulo="Sobra na semana" valor={`${formatarQtd(totalSobra)}`} detalhe="na unidade registrada" tom="ouro" />
+        <Kpi rotulo="Sobra na semana" valor={sobraRotulo} detalhe="kg e porções nunca são somados" tom="ouro" />
         <Kpi
           rotulo="Valor da sobra"
           valor={valorados.length > 0 ? `≈ ${formatarReais(totalCusto)}` : '—'}
           detalhe={registros.length > 0 ? `${coberturaValor}% dos lançamentos valorados` : 'registre produzido e consumido'}
           tom="vermelho"
         />
-        <Kpi rotulo="Taxa de sobra" valor={`${Math.round(taxa * 100)}%`} detalhe="do que foi produzido" tom={taxa > 0.1 ? 'vermelho' : 'verde'} />
+        <Kpi rotulo="Taxa de sobra" valor={taxaRotulo} detalhe="calculada dentro de cada unidade" tom={taxaCritica ? 'vermelho' : 'verde'} />
       </div>
 
       <Cartao className="!py-3">
         <p className="text-xs leading-5 text-texto-suave">
           <strong className="text-carvao-700 dark:text-carvao-200">Como o valor é calculado:</strong>{' '}
-          sobra em porções usa o custo por porção do prato; sobra em kg usa o custo estimado do principal dividido pelo rendimento em kg que você informou como produzido. O sistema não trata 1 kg como se fosse 1 refeição.
+          sobra em porções usa o custo por porção do prato; sobra em kg usa o custo estimado do principal dividido pelo rendimento em kg que você informou como produzido. O sistema não trata 1 kg como se fosse 1 refeição e não soma kg com porções nos indicadores.
         </p>
       </Cartao>
 
@@ -175,15 +193,15 @@ export function AbaDesperdicio({
       )}
 
       {porPrato.length > 0 && (
-        <Secao titulo="Pratos com maior sobra">
+        <Secao titulo="Pratos para revisar">
           <Cartao className="!p-0">
             <ul className="divide-y divide-carvao-100 dark:divide-carvao-700/60">
               {porPrato.slice(0, 6).map((p) => (
-                <li key={p.prato} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <li key={`${p.prato}-${p.unid}`} className="flex items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{p.prato}</p>
                     <p className="text-caption text-texto-suave">
-                      {formatarQtd(p.sobra)} de sobra{p.valorados > 0 ? ` · ≈ ${formatarReais(p.custo)}` : ' · sem base de valor suficiente'}
+                      {formatarQtd(p.sobra)} {p.unid} de sobra{p.valorados > 0 ? ` · ≈ ${formatarReais(p.custo)}` : ' · sem base de valor suficiente'}
                     </p>
                   </div>
                   <Pilula tom="ouro">revisar produção</Pilula>
@@ -223,7 +241,7 @@ export function AbaDesperdicio({
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Pilula tom="ouro">{formatarQtd(Math.max(0, r.produzido - r.consumido))} sobra</Pilula>
+                        <Pilula tom="ouro">{formatarQtd(Math.max(0, r.produzido - r.consumido))} {r.unid} sobra</Pilula>
                         {podeEditar && (
                           <button
                             onClick={() => removerComUndo(r)}
