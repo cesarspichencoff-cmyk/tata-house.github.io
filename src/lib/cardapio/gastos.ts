@@ -3,15 +3,10 @@
 /* =====================================================================
    Livro-caixa de compras — o gasto REAL da casa, mês a mês.
 
-   Por que existe: a leitura de nota fiscal já extraía fornecedor, data,
-   total e todos os itens — e o app aproveitava só os preços, jogando o
-   resto fora. A tela de Gastos lia um arquivo estático de jan–mai/26,
-   congelado: entrava nota nova e o número não mexia. Quem opera olhava
-   um gasto de meses atrás achando que era o de agora.
-
-   Agora toda nota lida vira um lançamento aqui, e o histórico da
-   planilha continua servindo aos meses anteriores ao app. O mês corrente
-   passa a ser fato, não memória.
+   Toda nota lida vira lançamento e qualquer gravação notifica as demais
+   superfícies da mesma aba. O evento nativo `storage` só dispara em outras
+   abas; sem esta notificação, Relatórios/Gastos podia ficar visualmente
+   congelado mesmo depois de uma NF ser registrada no próprio app.
    ===================================================================== */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -20,6 +15,7 @@ import { normalizar } from './motor';
 
 const PREFIXO = 'cardapio.v1.';
 const CHAVE = 'gastos';
+const EVENTO_CHAVE = 'tata:chave-externa';
 
 export interface ItemGasto {
   produto: string;
@@ -62,12 +58,22 @@ function ler(): LancamentoGasto[] {
   }
 }
 
-function gravar(lista: LancamentoGasto[]): void {
+function notificarMudanca() {
+  if (typeof window === 'undefined') return;
+  const emitir = () => window.dispatchEvent(new CustomEvent(EVENTO_CHAVE, { detail: { chave: CHAVE } }));
+  if (typeof queueMicrotask === 'function') queueMicrotask(emitir);
+  else window.setTimeout(emitir, 0);
+}
+
+function gravar(lista: LancamentoGasto[]): boolean {
   try {
-    // setItem é espelhado na nuvem — o livro-caixa vale para a casa toda.
+    // setItem continua espelhado pela camada de sincronização da casa.
     localStorage.setItem(PREFIXO + CHAVE, JSON.stringify(lista));
+    notificarMudanca();
+    return true;
   } catch {
-    /* armazenamento cheio: o aviso global já cobre */
+    // Não emite evento nem finge atualização persistida quando a escrita falha.
+    return false;
   }
 }
 
@@ -160,6 +166,25 @@ export function useGastos() {
   const recarregar = useCallback(() => setLancamentos(ler()), []);
   useEffect(() => { recarregar(); }, [recarregar]);
 
+  // Reage a gravações da própria aba e também de outra aba/aparelho depois da
+  // reconciliação. Assim gasto, relatório e inteligência financeira não ficam
+  // defasados até um reload manual.
+  useEffect(() => {
+    const onExterno = (e: Event) => {
+      const chave = (e as CustomEvent<{ chave?: string }>).detail?.chave;
+      if (chave === CHAVE) recarregar();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === PREFIXO + CHAVE) recarregar();
+    };
+    window.addEventListener(EVENTO_CHAVE, onExterno);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(EVENTO_CHAVE, onExterno);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [recarregar]);
+
   const registrar = useCallback((l: Omit<LancamentoGasto, 'id' | 'em'>): void => {
     setLancamentos((atual) => {
       // Mesma nota lida duas vezes não vira gasto dobrado.
@@ -173,16 +198,14 @@ export function useGastos() {
         em: new Date().toISOString(),
       };
       const lista = [novo, ...atual].slice(0, 500);
-      gravar(lista);
-      return lista;
+      return gravar(lista) ? lista : atual;
     });
   }, []);
 
   const remover = useCallback((id: string): void => {
     setLancamentos((atual) => {
       const lista = atual.filter((x) => x.id !== id);
-      gravar(lista);
-      return lista;
+      return gravar(lista) ? lista : atual;
     });
   }, []);
 
