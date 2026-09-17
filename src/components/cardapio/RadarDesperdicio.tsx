@@ -3,23 +3,31 @@
 /* =====================================================================
    Radar de desperdício preditivo — aprende, semana a semana, quanto cada
    prato costuma sobrar e antecipa o desperdício dos pratos planejados para
-   esta semana. Não é um relatório do passado: é uma previsão acionável
-   ("produza ~X% a menos") antes de cozinhar. Tudo local e determinístico.
+   esta semana. Não é um relatório do passado: é uma previsão acionável.
+
+   Integridade dimensional: registros em kg e porções nunca têm quantidades
+   somadas. O padrão histórico usa a média das taxas de cada lançamento,
+   que é adimensional e portanto comparável entre unidades.
+
+   Integridade financeira: a economia prevista usa o custo por porção do
+   próprio prato quando há cobertura culinária/preço suficiente. O House não
+   aplica mais um custo médio genérico da semana a qualquer prato.
    ===================================================================== */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Cartao, Pilula, Secao } from '@/components/ui';
 import { DIAS_SEMANA, formatarReais, normalizar } from '@/lib/cardapio/motor';
-import { resumoSemana } from '@/lib/cardapio/indicadores';
+import { calcularCustoPrato } from '@/lib/cardapio/custo-prato';
+import { taxaDesperdicioRegistro } from '@/lib/cardapio/desperdicio-metricas';
 import { lerDesperdicio, semanasComConteudo } from '@/lib/cardapio/estado';
+import { useEstimativas } from '@/lib/cardapio/estimativas';
 import type { EstadoSemana, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 interface Padrao {
-  prato: string; // rótulo original (último visto)
-  ocasioes: number; // quantas vezes foi servido/registrado
-  produzido: number;
-  sobra: number;
-  taxa: number; // sobra / produzido (0..1)
+  prato: string;
+  ocasioes: number;
+  somaTaxas: number;
+  taxa: number;
 }
 
 interface Previsao {
@@ -27,8 +35,9 @@ interface Previsao {
   prato: string;
   taxa: number;
   ocasioes: number;
-  cortePct: number; // quanto produzir a menos (%)
-  custoEvitado: number; // por refeição × pessoas × taxa
+  cortePct: number;
+  custoEvitado: number | null;
+  coberturaCusto: number;
 }
 
 export function RadarDesperdicio({
@@ -43,54 +52,60 @@ export function RadarDesperdicio({
   registros: RegistroDesperdicio[];
 }) {
   const [padroes, setPadroes] = useState<Map<string, Padrao>>(new Map());
+  const { estimativas } = useEstimativas();
 
-  // Aprende com todo o histórico de sobras (todas as semanas com cardápio).
+  // `fatores` permanece no contrato do componente porque o restante da tela
+  // operacional já o fornece. O radar, porém, calcula custo diretamente da
+  // receita do prato para não misturar um fator agregado com valor culinário.
+  void fatores;
+
+  // Aprende com todo o histórico, sem somar kg com porções. Cada lançamento
+  // contribui com sua própria taxa de sobra (um percentual adimensional).
   useEffect(() => {
     const m = new Map<string, Padrao>();
     const semanas = semanasComConteudo();
     semanas.forEach((sid) => {
       lerDesperdicio(sid).forEach((r) => {
         const k = normalizar(r.prato);
-        if (!k) return;
-        const prev = m.get(k) ?? { prato: r.prato, ocasioes: 0, produzido: 0, sobra: 0, taxa: 0 };
+        const taxa = taxaDesperdicioRegistro(r);
+        if (!k || taxa == null) return;
+        const prev = m.get(k) ?? { prato: r.prato, ocasioes: 0, somaTaxas: 0, taxa: 0 };
         prev.prato = r.prato;
         prev.ocasioes += 1;
-        prev.produzido += r.produzido;
-        prev.sobra += Math.max(0, r.produzido - r.consumido);
+        prev.somaTaxas += taxa;
         m.set(k, prev);
       });
     });
     m.forEach((p) => {
-      p.taxa = p.produzido > 0 ? p.sobra / p.produzido : 0;
+      p.taxa = p.ocasioes > 0 ? p.somaTaxas / p.ocasioes : 0;
     });
     setPadroes(m);
-    // recomputa quando as sobras da semana atual mudam (cobre o fluxo de edição)
   }, [registros]);
 
-  const resumo = useMemo(() => resumoSemana(estado, precos, fatores), [estado, precos, fatores]);
-  const custoRef = resumo.custoRefReal ?? resumo.custoRefEstimado ?? 0;
-
-  // Previsões para os pratos planejados nesta semana.
   const previsoes = useMemo<Previsao[]>(() => {
     const out: Previsao[] = [];
     estado.dias.forEach((d, dia) => {
       if (!d.principal) return;
       const p = padroes.get(normalizar(d.principal));
-      if (!p || p.ocasioes < 2 || p.taxa < 0.08) return; // só prevê com histórico e sobra relevante
+      if (!p || p.ocasioes < 2 || p.taxa < 0.08) return;
+
       const cortePct = Math.min(40, Math.round(p.taxa * 100));
+      const custo = calcularCustoPrato(d.principal, 'Principal', precos, d.pessoas, estimativas);
+      const custoConfiavel = custo && custo.custoPorcao > 0 && custo.cobertura >= 0.4;
+
       out.push({
         dia,
         prato: d.principal,
         taxa: p.taxa,
         ocasioes: p.ocasioes,
         cortePct,
-        custoEvitado: custoRef * d.pessoas * p.taxa,
+        custoEvitado: custoConfiavel ? custo.custoPorcao * d.pessoas * p.taxa : null,
+        coberturaCusto: custo?.cobertura ?? 0,
       });
     });
     return out.sort((a, b) => b.taxa - a.taxa);
-  }, [estado.dias, padroes, custoRef]);
+  }, [estado.dias, padroes, precos, estimativas]);
 
-  // Lista de observação: pratos historicamente perdulários fora desta semana.
   const naSemana = new Set(estado.dias.map((d) => normalizar(d.principal)).filter(Boolean));
   const observar = useMemo(
     () =>
@@ -102,9 +117,10 @@ export function RadarDesperdicio({
     [padroes, estado.dias],
   );
 
-  const custoEvitavel = previsoes.reduce((a, p) => a + p.custoEvitado, 0);
+  const previsoesValoradas = previsoes.filter((p) => p.custoEvitado != null);
+  const custoEvitavel = previsoesValoradas.reduce((a, p) => a + (p.custoEvitado ?? 0), 0);
 
-  if (padroes.size === 0) return null; // sem histórico ainda
+  if (padroes.size === 0) return null;
 
   const confianca = (n: number) => (n >= 5 ? 'alta' : n >= 3 ? 'média' : 'baixa');
 
@@ -112,8 +128,8 @@ export function RadarDesperdicio({
     <Secao
       titulo="Radar preditivo de desperdício"
       acao={
-        custoEvitavel > 0 ? (
-          <Pilula tom="verde">evita ~{formatarReais(custoEvitavel)}/sem</Pilula>
+        previsoesValoradas.length > 0 && custoEvitavel > 0 ? (
+          <Pilula tom="verde">evita ≈ {formatarReais(custoEvitavel)}/sem</Pilula>
         ) : (
           <Pilula tom="azul">{padroes.size} pratos aprendidos</Pilula>
         )
@@ -125,8 +141,7 @@ export function RadarDesperdicio({
             Nenhum risco previsto para os pratos desta semana.
           </p>
           <p className="text-caption text-texto-suave">
-            O radar aprendeu com {padroes.size} prato(s) do histórico. Os pratos planejados não têm padrão de sobra
-            relevante.
+            O radar aprendeu com {padroes.size} prato(s) do histórico. Os pratos planejados não têm padrão de sobra relevante.
           </p>
         </Cartao>
       ) : (
@@ -141,10 +156,13 @@ export function RadarDesperdicio({
                 <p className="text-rotulo text-carvao-500 dark:text-areia-200">
                   Costuma sobrar <strong>~{Math.round(p.taxa * 100)}%</strong> — produza{' '}
                   <strong>~{p.cortePct}% a menos</strong>
-                  {custoRef ? <> e evite ~{formatarReais(p.custoEvitado)}</> : null}.
+                  {p.custoEvitado != null ? <> e evite ≈ {formatarReais(p.custoEvitado)}</> : null}.
                 </p>
                 <p className="text-micro text-texto-suave">
-                  confiança {confianca(p.ocasioes)} · {p.ocasioes} registro(s)
+                  confiança {confianca(p.ocasioes)} · {p.ocasioes} registro(s) · média de percentuais, sem somar kg e porções
+                  {p.custoEvitado != null
+                    ? ` · valor pelo custo do próprio prato (${Math.round(p.coberturaCusto * 100)}% de cobertura)`
+                    : ' · valor em R$ omitido por falta de base de custo suficiente'}
                 </p>
               </div>
               <Pilula tom={p.taxa >= 0.2 ? 'vermelho' : 'ouro'}>−{p.cortePct}%</Pilula>
@@ -168,7 +186,7 @@ export function RadarDesperdicio({
       )}
 
       <p className="text-micro text-texto-suave">
-        Previsões aprendidas dos seus lançamentos de sobra. Quanto mais você registrar, mais preciso fica.
+        Previsões aprendidas dos seus lançamentos de sobra. Quanto mais você registrar, mais estável fica a estimativa. Valores em reais só aparecem quando a receita tem base de custo suficiente.
       </p>
     </Secao>
   );

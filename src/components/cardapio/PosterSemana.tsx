@@ -119,18 +119,14 @@ export function PosterSemana({
       // Cabeçalho
       ctx.textAlign = 'left';
       ctx.fillStyle = '#92713a';
-      ctx.font = `700 20px ${SANS}, sans-serif`;
-      ctx.fillText('TATÁ HOUSE', M, 74);
+      ctx.font = `700 17px ${SANS}, sans-serif`;
+      ctx.fillText('TATÁ HOUSE · REFEITÓRIO DO TATÁ SUSHI', M, 72);
       ctx.fillStyle = '#055d2f';
-      ctx.font = `700 52px ${DISPLAY}, serif`;
-      ctx.fillText('Cardápio da semana', M, 130);
-      // pílula do período
-      ctx.font = `700 20px ${SANS}, sans-serif`;
-      const pw = ctx.measureText(periodo.toUpperCase()).width + 36;
-      ctx.fillStyle = '#007638';
-      rrect(M, 152, pw, 38, 19); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(periodo.toUpperCase(), M + 18, 178);
+      ctx.font = `700 54px ${DISPLAY}, serif`;
+      ctx.fillText('Cardápio da semana', M, 132);
+      ctx.fillStyle = '#92713a';
+      ctx.font = `700 18px ${SANS}, sans-serif`;
+      ctx.fillText(('SEMANA · ' + periodo).toUpperCase(), M, 174);
 
       // Logo + QR no canto superior direito
       try {
@@ -163,8 +159,14 @@ export function PosterSemana({
           }
         }
 
-        const qrSize = logo ? 110 : 170;
-        ctx.drawImage(qr, qrAreaX + (170 - qrSize) / 2, nextY, qrSize, qrSize);
+        const qrSize = logo ? 110 : 150;
+        const qrX = qrAreaX + (170 - qrSize) / 2;
+        const qrPad = 10;
+        ctx.fillStyle = '#ffffff';
+        rrect(qrX - qrPad, nextY - qrPad, qrSize + qrPad * 2, qrSize + qrPad * 2, 16); ctx.fill();
+        ctx.strokeStyle = '#e8e1d3'; ctx.lineWidth = 1.5;
+        rrect(qrX - qrPad, nextY - qrPad, qrSize + qrPad * 2, qrSize + qrPad * 2, 16); ctx.stroke();
+        ctx.drawImage(qr, qrX, nextY, qrSize, qrSize);
         ctx.fillStyle = '#7c828c';
         ctx.font = `600 12px ${SANS}, sans-serif`;
         ctx.textAlign = 'center';
@@ -186,22 +188,22 @@ export function PosterSemana({
       let y = 262;
       estado.dias.forEach((dia, i) => {
         const fim = i >= 5;
-        ctx.fillStyle = fim ? '#055d2f' : '#007638';
+        const prot = dia.principal ? proteinaDoPrato(dia.principal) : 'outros';
+        ctx.fillStyle = fim ? '#f3efe7' : '#ffffff';
         rrect(x0, y, cw, cardH, 18); ctx.fill();
-
-        // Acento dourado à esquerda nos fins de semana
-        if (fim) {
-          ctx.fillStyle = '#c8a96b';
-          ctx.fillRect(x0, y + 18, 6, cardH - 36);
-        }
+        ctx.strokeStyle = fim ? '#dcc492' : '#e8e1d3';
+        ctx.lineWidth = 1.5;
+        rrect(x0, y, cw, cardH, 18); ctx.stroke();
+        ctx.fillStyle = COR_PROTEINA[prot];
+        ctx.fillRect(x0, y + 18, 6, cardH - 36);
 
         // dia + data
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#055d2f';
         ctx.font = `700 22px ${DISPLAY}, serif`;
         ctx.fillText(DIAS_POSTER[i], x0 + 78, y + cardH / 2 - 4);
-        ctx.fillStyle = '#c9f5da';
-        ctx.font = `600 15px ${SANS}, sans-serif`;
+        ctx.fillStyle = '#92713a';
+        ctx.font = `700 14px ${SANS}, sans-serif`;
         ctx.fillText(ddmm(datas[i]), x0 + 78, y + cardH / 2 + 22);
 
         // separador
@@ -216,21 +218,21 @@ export function PosterSemana({
 
         if (dia.principal) {
           ctx.textAlign = 'left';
-          ctx.fillStyle = '#ffffff';
-          ctx.font = `800 25px ${SANS}, sans-serif`;
+          ctx.fillStyle = '#15171b';
+          ctx.font = `700 26px ${DISPLAY}, serif`;
           ctx.fillText(fit(dia.principal, maxTexto), dx, y + 44);
           const guarn = [dia.guarnicaoFixa, dia.guarnicao].filter(Boolean).join(' · ');
           if (guarn) {
-            ctx.fillStyle = '#c9f5da';
-            ctx.font = `600 17px ${SANS}, sans-serif`;
+            ctx.fillStyle = '#41454e';
+            ctx.font = `600 16px ${SANS}, sans-serif`;
             ctx.fillText(fit(guarn, maxTexto), dx, y + 72);
           }
           const extras: string[] = [];
           if (dia.salada) extras.push('Salada ' + dia.salada);
           if (dia.sobremesa) extras.push('Sobremesa ' + dia.sobremesa);
           if (extras.length) {
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.font = `500 15px ${SANS}, sans-serif`;
+            ctx.fillStyle = '#565c66';
+            ctx.font = `500 14px ${SANS}, sans-serif`;
             ctx.fillText(fit(extras.join('   •   '), maxTexto), dx, y + 98);
           }
           // nutrição
@@ -239,16 +241,16 @@ export function PosterSemana({
             ctx.fillStyle = '#e3b45c';
             ctx.font = `700 32px ${DISPLAY}, serif`;
             ctx.fillText(String(nut.kcal), x0 + cw - 24, y + cardH / 2 - 2);
-            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.fillStyle = '#7c828c';
             ctx.font = `700 12px ${SANS}, sans-serif`;
             ctx.fillText('KCAL', x0 + cw - 24, y + cardH / 2 + 16);
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.font = `600 14px ${SANS}, sans-serif`;
+            ctx.fillStyle = '#41454e';
+            ctx.font = `600 13px ${SANS}, sans-serif`;
             ctx.fillText(`${nut.prot}g prot.`, x0 + cw - 24, y + cardH / 2 + 38);
           }
         } else {
           ctx.textAlign = 'left';
-          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          ctx.fillStyle = '#a3906c';
           ctx.font = `italic 700 18px ${SANS}, sans-serif`;
           ctx.fillText('A definir', dx, y + cardH / 2 + 6);
         }
@@ -364,8 +366,9 @@ export function PosterSemana({
               <h1 className="mt-1 font-display text-[44px] font-black leading-[0.95] tracking-tight text-brand-800">
                 Cardápio da semana
               </h1>
-              <div className="mt-3 inline-flex items-center rounded-full bg-brand-700 px-5 py-1.5 text-[14px] font-bold uppercase tracking-[0.18em] text-white">
-                {periodo}
+              <div className="mt-4 flex items-center gap-3">
+                <span className="h-px w-10 bg-ouro-500" aria-hidden />
+                <span className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-ouro-600">Semana · {periodo}</span>
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-center gap-2">
@@ -373,7 +376,9 @@ export function PosterSemana({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={logo} alt="" className="h-14 w-auto max-w-[130px] object-contain" />
               ) : null}
-              <QrCode url={urlAvaliar} size={92} className="rounded-lg ring-1 ring-brand-200" />
+              <div className="rounded-2xl border border-areia-200 bg-white p-2 shadow-[0_2px_12px_rgba(14,16,19,.06)]">
+                <QrCode url={urlAvaliar} size={88} />
+              </div>
               <div className="max-w-[104px] text-center text-[8px] font-bold uppercase leading-tight tracking-[0.14em] text-carvao-400">
                 Aponte a câmera e avalie o prato
               </div>
@@ -392,19 +397,17 @@ export function PosterSemana({
             return (
               <section
                 key={i}
-                className={`relative grid grid-cols-[96px_1fr_auto] items-stretch gap-5 overflow-hidden rounded-2xl px-5 py-3 text-white ${
+                className={`relative grid grid-cols-[96px_1fr_auto] items-stretch gap-5 overflow-hidden rounded-2xl border px-5 py-3 text-carvao-900 shadow-[0_1px_0_rgba(14,16,19,.03)] ${
                   fimDeSemana
-                    ? 'bg-brand-800 ring-1 ring-ouro-400/70'
-                    : 'bg-brand-700'
+                    ? 'border-ouro-300/70 bg-areia-100'
+                    : 'border-areia-200 bg-white'
                 }`}
+                style={{ borderLeftWidth: 4, borderLeftColor: COR_PROTEINA[prot] }}
               >
-                {fimDeSemana && (
-                  <div className="absolute left-0 top-0 h-full w-1 bg-ouro-400" aria-hidden />
-                )}
                 {/* Coluna 1 — dia + data */}
-                <div className="flex flex-col items-center justify-center border-r border-white/20 pr-4 text-center">
-                  <span className="font-display text-[15px] font-black leading-tight">{DIAS_POSTER[i]}</span>
-                  <span className="mt-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-bold tracking-wide text-brand-100">
+                <div className="flex flex-col items-center justify-center border-r border-areia-200 pr-4 text-center">
+                  <span className="font-display text-[15px] font-black leading-tight text-brand-800">{DIAS_POSTER[i]}</span>
+                  <span className="mt-1 rounded-full bg-areia-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-ouro-600 ring-1 ring-areia-200">
                     {ddmm(datas[i])}
                   </span>
                 </div>
@@ -413,32 +416,27 @@ export function PosterSemana({
                 <div className="min-w-0 self-center">
                   {dia.principal ? (
                     <>
-                      <p className="flex items-center gap-2 text-[16px] font-extrabold leading-snug">
-                        <span
-                          className="inline-block h-3 w-3 shrink-0 rounded-full ring-2 ring-white/50"
-                          style={{ backgroundColor: COR_PROTEINA[prot] }}
-                          aria-hidden
-                        />
-                        <span className="min-w-0">{dia.principal}</span>
+                      <p className="font-display text-[18px] font-bold leading-snug tracking-[-0.01em] text-carvao-900">
+                        {dia.principal}
                       </p>
                       {guarnicoes && (
-                        <p className="mt-1 pl-5 text-[11.5px] font-semibold text-brand-100">{guarnicoes}</p>
+                        <p className="mt-1 text-[11.5px] font-semibold text-carvao-600">{guarnicoes}</p>
                       )}
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 pl-5 text-[11px] text-white/85">
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-carvao-500">
                         {dia.salada && (
                           <span>
-                            <span className="font-bold text-ouro-300">Salada</span> {dia.salada}
+                            <span className="font-bold text-brand-700">Salada</span> {dia.salada}
                           </span>
                         )}
                         {dia.sobremesa && (
                           <span>
-                            <span className="font-bold text-ouro-300">Sobremesa</span> {dia.sobremesa}
+                            <span className="font-bold text-brand-700">Sobremesa</span> {dia.sobremesa}
                           </span>
                         )}
                       </div>
                     </>
                   ) : (
-                    <p className="py-2 text-sm font-bold italic text-white/55">A definir</p>
+                    <p className="py-2 text-sm font-bold italic text-carvao-400">A definir</p>
                   )}
                 </div>
 
@@ -446,40 +444,22 @@ export function PosterSemana({
                 <div className="flex w-[80px] flex-col items-end justify-center text-right">
                   {dia.principal && nut ? (
                     <>
-                      <span className="font-display text-[22px] font-black leading-none text-ouro-300 tabular-nums">
+                      <span className="font-display text-[22px] font-black leading-none text-ouro-600 tabular-nums">
                         {nut.kcal}
                       </span>
-                      <span className="text-[9px] font-bold uppercase tracking-wide text-white/60">kcal</span>
-                      <span className="mt-1 text-[11px] font-semibold text-white/85 tabular-nums">
+                      <span className="text-[9px] font-bold uppercase tracking-wide text-carvao-400">kcal</span>
+                      <span className="mt-1 text-[11px] font-semibold text-carvao-500 tabular-nums">
                         {nut.prot}g prot.
                       </span>
                     </>
                   ) : (
-                    <span className="text-[10px] text-white/30">—</span>
+                    <span className="text-[10px] text-carvao-300">—</span>
                   )}
                 </div>
               </section>
             );
           })}
         </main>
-
-        {/* Legenda de proteínas */}
-        <div className="mx-10 mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-carvao-400">Proteína:</p>
-          {([
-            { rot: 'Bovina', cor: '#e0867c' },
-            { rot: 'Frango', cor: '#e3b45c' },
-            { rot: 'Suína', cor: '#dd92b4' },
-            { rot: 'Peixe', cor: '#7cb8d4' },
-            { rot: 'Ovo', cor: '#dcc492' },
-            { rot: 'Outros', cor: '#cdd6cf' },
-          ] as { rot: string; cor: string }[]).map((item) => (
-            <span key={item.rot} className="flex items-center gap-1.5">
-              <span className="h-3 w-3 shrink-0 rounded-full ring-1 ring-carvao-200/60" style={{ backgroundColor: item.cor }} aria-hidden />
-              <span className="text-[10px] font-semibold text-carvao-400">{item.rot}</span>
-            </span>
-          ))}
-        </div>
 
         {/* Informação nutricional média — só os números, sem score */}
         {mediaNutri && (

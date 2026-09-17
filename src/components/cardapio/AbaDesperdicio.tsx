@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react';
 import { toast } from '@/components/Toast';
 import { Botao, Cartao, EstadoVazio, Kpi, Pilula, Secao, estiloInput, estiloRotulo } from '@/components/ui';
 import { DIAS_SEMANA, formatarQtd, formatarReais } from '@/lib/cardapio/motor';
-import { resumoSemana } from '@/lib/cardapio/indicadores';
 import { RadarDesperdicio } from '@/components/cardapio/RadarDesperdicio';
+import { estimarValorDesperdicio } from '@/lib/cardapio/inteligencia-viva';
+import { resumirDesperdicioPorUnidade } from '@/lib/cardapio/desperdicio-metricas';
+import { useEstimativas } from '@/lib/cardapio/estimativas';
 import type { EstadoSemana, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 export function AbaDesperdicio({
@@ -25,6 +27,7 @@ export function AbaDesperdicio({
   remover: (id: string) => void;
   podeEditar: boolean;
 }) {
+  const { estimativas } = useEstimativas();
   const [dia, setDia] = useState(0);
   const [prato, setPrato] = useState('');
   const [produzido, setProduzido] = useState('');
@@ -32,28 +35,51 @@ export function AbaDesperdicio({
   const [unid, setUnid] = useState<'porções' | 'kg'>('porções');
   const [motivo, setMotivo] = useState('');
 
-  const resumo = useMemo(() => resumoSemana(estado, precos, fatores), [estado, precos, fatores]);
-  const custoRef = resumo.custoRefReal ?? resumo.custoRefEstimado ?? 0;
+  const valores = useMemo(() => {
+    const mapa = new Map<string, ReturnType<typeof estimarValorDesperdicio>>();
+    registros.forEach((r) => mapa.set(r.id, estimarValorDesperdicio(r, { estado, precos, estimativas })));
+    return mapa;
+  }, [registros, estado, precos, estimativas]);
 
-  const custoSobra = (r: RegistroDesperdicio) => Math.max(0, r.produzido - r.consumido) * custoRef;
+  const resumoUnidades = useMemo(() => resumirDesperdicioPorUnidade(registros), [registros]);
+  const partesSobra = [
+    resumoUnidades['porções'].registros > 0 ? `${formatarQtd(resumoUnidades['porções'].sobra)} porções` : null,
+    resumoUnidades.kg.registros > 0 ? `${formatarQtd(resumoUnidades.kg.sobra)} kg` : null,
+  ].filter(Boolean) as string[];
+  const sobraRotulo = partesSobra.length > 0 ? partesSobra.join(' · ') : '—';
 
-  const totalSobra = registros.reduce((a, r) => a + Math.max(0, r.produzido - r.consumido), 0);
-  const totalCusto = registros.reduce((a, r) => a + custoSobra(r), 0);
-  const totalProduzido = registros.reduce((a, r) => a + r.produzido, 0);
-  const taxa = totalProduzido > 0 ? totalSobra / totalProduzido : 0;
+  const partesTaxa = [
+    resumoUnidades['porções'].taxa != null ? `${Math.round(resumoUnidades['porções'].taxa * 100)}% porções` : null,
+    resumoUnidades.kg.taxa != null ? `${Math.round(resumoUnidades.kg.taxa * 100)}% kg` : null,
+  ].filter(Boolean) as string[];
+  const taxaRotulo = partesTaxa.length > 0 ? partesTaxa.join(' · ') : '—';
+  const taxaCritica = [resumoUnidades['porções'].taxa, resumoUnidades.kg.taxa]
+    .filter((v): v is number => v != null)
+    .some((v) => v > 0.1);
+
+  const valorados = registros.filter((r) => valores.get(r.id)?.valor != null);
+  const totalCusto = valorados.reduce((a, r) => a + (valores.get(r.id)?.valor ?? 0), 0);
+  const coberturaValor = registros.length > 0 ? Math.round((valorados.length / registros.length) * 100) : 0;
 
   const porPrato = useMemo(() => {
-    const m = new Map<string, { prato: string; sobra: number; custo: number }>();
+    const m = new Map<string, { prato: string; unid: RegistroDesperdicio['unid']; sobra: number; custo: number; valorados: number }>();
     registros.forEach((r) => {
-      const k = r.prato.toLowerCase();
-      const prev = m.get(k) ?? { prato: r.prato, sobra: 0, custo: 0 };
-      prev.sobra += Math.max(0, r.produzido - r.consumido);
-      prev.custo += custoSobra(r);
+      const k = `${r.prato.toLowerCase()}::${r.unid}`;
+      const prev = m.get(k) ?? { prato: r.prato, unid: r.unid, sobra: 0, custo: 0, valorados: 0 };
+      prev.sobra += Math.max(0, r.produzido - Math.min(r.consumido, r.produzido));
+      const valor = valores.get(r.id)?.valor;
+      if (valor != null) {
+        prev.custo += valor;
+        prev.valorados += 1;
+      }
       m.set(k, prev);
     });
-    return Array.from(m.values()).sort((a, b) => b.sobra - a.sobra);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registros, custoRef]);
+    return Array.from(m.values()).sort((a, b) => {
+      if (a.valorados > 0 || b.valorados > 0) return b.custo - a.custo;
+      if (a.unid === b.unid) return b.sobra - a.sobra;
+      return a.prato.localeCompare(b.prato);
+    });
+  }, [registros, valores]);
 
   const removerComUndo = (r: RegistroDesperdicio) => {
     remover(r.id);
@@ -95,10 +121,22 @@ export function AbaDesperdicio({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-3">
-        <Kpi rotulo="Sobra na semana" valor={`${formatarQtd(totalSobra)}`} detalhe="porções/kg" tom="ouro" />
-        <Kpi rotulo="Custo perdido" valor={custoRef ? formatarReais(totalCusto) : '—'} detalhe={custoRef ? 'estimado' : 'defina custo/refeição'} tom="vermelho" />
-        <Kpi rotulo="Taxa de sobra" valor={`${Math.round(taxa * 100)}%`} detalhe="do que foi produzido" tom={taxa > 0.1 ? 'vermelho' : 'verde'} />
+        <Kpi rotulo="Sobra na semana" valor={sobraRotulo} detalhe="kg e porções nunca são somados" tom="ouro" />
+        <Kpi
+          rotulo="Valor da sobra"
+          valor={valorados.length > 0 ? `≈ ${formatarReais(totalCusto)}` : '—'}
+          detalhe={registros.length > 0 ? `${coberturaValor}% dos lançamentos valorados` : 'registre produzido e consumido'}
+          tom="vermelho"
+        />
+        <Kpi rotulo="Taxa de sobra" valor={taxaRotulo} detalhe="calculada dentro de cada unidade" tom={taxaCritica ? 'vermelho' : 'verde'} />
       </div>
+
+      <Cartao className="!py-3">
+        <p className="text-xs leading-5 text-texto-suave">
+          <strong className="text-carvao-700 dark:text-carvao-200">Como o valor é calculado:</strong>{' '}
+          sobra em porções usa o custo por porção do prato; sobra em kg usa o custo estimado do principal dividido pelo rendimento em kg que você informou como produzido. O sistema não trata 1 kg como se fosse 1 refeição e não soma kg com porções nos indicadores.
+        </p>
+      </Cartao>
 
       <RadarDesperdicio estado={estado} precos={precos} fatores={fatores} registros={registros} />
 
@@ -144,7 +182,7 @@ export function AbaDesperdicio({
               </div>
               <div>
                 <label className={estiloRotulo}>Motivo</label>
-                <input className={estiloInput} placeholder="ex.: sobrou arroz" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+                <input className={estiloInput} placeholder="ex.: demanda menor" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
               </div>
             </div>
             <Botao onClick={lancar} className="w-full">
@@ -154,68 +192,69 @@ export function AbaDesperdicio({
         </Secao>
       )}
 
-      {/* Ranking de sobra por prato + sugestão */}
       {porPrato.length > 0 && (
-        <Secao titulo="Pratos com maior sobra">
+        <Secao titulo="Pratos para revisar">
           <Cartao className="!p-0">
             <ul className="divide-y divide-carvao-100 dark:divide-carvao-700/60">
               {porPrato.slice(0, 6).map((p) => (
-                <li key={p.prato} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                <li key={`${p.prato}-${p.unid}`} className="flex items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{p.prato}</p>
                     <p className="text-caption text-texto-suave">
-                      {formatarQtd(p.sobra)} de sobra{custoRef ? ` · ${formatarReais(p.custo)}` : ''}
+                      {formatarQtd(p.sobra)} {p.unid} de sobra{p.valorados > 0 ? ` · ≈ ${formatarReais(p.custo)}` : ' · sem base de valor suficiente'}
                     </p>
                   </div>
-                  <Pilula tom="ouro">reduzir porção</Pilula>
+                  <Pilula tom="ouro">revisar produção</Pilula>
                 </li>
               ))}
             </ul>
           </Cartao>
           {porPrato[0] && porPrato[0].sobra > 0 && (
             <p className="text-xs font-semibold text-ouro-600 dark:text-ouro-300">
-              Sugestão: na próxima vez que servir <strong>{porPrato[0].prato}</strong>, produza um pouco menos — foi o
-              prato que mais sobrou.
+              Na próxima vez que servir <strong>{porPrato[0].prato}</strong>, compare demanda prevista, refeições reais e sobra antes de reduzir a produção automaticamente.
             </p>
           )}
         </Secao>
       )}
 
-      {/* Histórico de lançamentos */}
       <Secao titulo="Lançamentos da semana">
         {registros.length === 0 ? (
-          <EstadoVazio titulo="Nenhuma sobra registrada" texto="Anote a sobra de cada dia para o app calcular o custo perdido e sugerir ajustes." />
+          <EstadoVazio titulo="Nenhuma sobra registrada" texto="Anote a sobra de cada dia para o app calcular taxa, valor e relação com a demanda." />
         ) : (
           <Cartao className="!p-0">
             <ul className="divide-y divide-carvao-100 dark:divide-carvao-700/60">
               {registros
                 .slice()
                 .reverse()
-                .map((r) => (
-                  <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">
-                        {r.prato} <span className="font-normal text-texto-suave">· {DIAS_SEMANA[r.dia].slice(0, 3)}</span>
-                      </p>
-                      <p className="text-caption text-texto-suave">
-                        produziu {formatarQtd(r.produzido)} · consumiu {formatarQtd(r.consumido)} {r.unid}
-                        {r.motivo ? ` · ${r.motivo}` : ''}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Pilula tom="ouro">{formatarQtd(Math.max(0, r.produzido - r.consumido))} sobra</Pilula>
-                      {podeEditar && (
-                        <button
-                          onClick={() => removerComUndo(r)}
-                          className="flex h-9 w-9 items-center justify-center rounded-full text-carvao-300 hover:bg-perigo/10 hover:text-perigo"
-                          aria-label="Remover"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                ))}
+                .map((r) => {
+                  const valor = valores.get(r.id)?.valor;
+                  return (
+                    <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {r.prato} <span className="font-normal text-texto-suave">· {DIAS_SEMANA[r.dia].slice(0, 3)}</span>
+                        </p>
+                        <p className="text-caption text-texto-suave">
+                          produziu {formatarQtd(r.produzido)} · consumiu {formatarQtd(r.consumido)} {r.unid}
+                          {valor != null ? ` · ≈ ${formatarReais(valor)}` : ''}
+                          {r.motivo ? ` · ${r.motivo}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Pilula tom="ouro">{formatarQtd(Math.max(0, r.produzido - r.consumido))} {r.unid} sobra</Pilula>
+                        {podeEditar && (
+                          <button
+                            onClick={() => removerComUndo(r)}
+                            className="flex h-9 w-9 items-center justify-center rounded-full text-carvao-300 hover:bg-perigo/10 hover:text-perigo"
+                            aria-label="Remover"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
             </ul>
           </Cartao>
         )}

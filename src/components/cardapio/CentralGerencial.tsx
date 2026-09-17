@@ -1,35 +1,44 @@
 'use client';
 
 /* =====================================================================
-   Central Gerencial — visão executiva com exportação CSV.
-   Não depende de nenhuma biblioteca externa: usa URL.createObjectURL
-   com Blob para download de CSV (compatível com Excel / Sheets).
+   Central Gerencial — leitura viva + exportação.
+
+   O estado atual da semana entra diretamente nos cálculos e o painel cruza
+   compras, NFs, demanda, estoque, desperdício, aceitação, preço e ofertas.
+   Fontes operacionais vivas são lidas por hooks internos para manter a
+   interface existente do componente e atualizar sem reload.
    ===================================================================== */
 
 import { useMemo, useState } from 'react';
 import { Cartao } from '@/components/ui';
 import { Icone } from '@/components/Icones';
+import { PainelInteligenciaViva } from './PainelInteligenciaViva';
 import {
   DIAS_SEMANA,
   converterParaUnidadeBase,
   formatarReais,
   linhasDoDia,
-  normalizar,
 } from '@/lib/cardapio/motor';
 import { resolverPreco } from '@/lib/cardapio/precos';
 import {
   useAuditoria,
+  useDesperdicio,
+  useContagemRefeicoes,
+  useEstoque,
+  useOfertas,
   semanasComConteudo,
   lerSemana,
   datasDaSemana,
   periodoSemana,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
+import { useGastos } from '@/lib/cardapio/gastos';
+import { construirInteligenciaViva } from '@/lib/cardapio/inteligencia-viva';
 import { indiceNutricionalSemana } from '@/lib/cardapio/nutricao-prato';
 import type { EstadoSemana, HistoricoPrecos, Aceitacao } from '@/lib/cardapio/tipos';
 
 function baixarCsv(nome: string, linhas: string[][]) {
-  const bom = '﻿'; // BOM para Excel reconhecer UTF-8
+  const bom = '﻿';
   const conteudo = bom + linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const blob = new Blob([conteudo], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -59,17 +68,59 @@ export function CentralGerencial({
 }) {
   const { registros: auditoria } = useAuditoria();
   const { estimativas } = useEstimativas();
+  const { lancamentos } = useGastos();
+  const { registros: desperdicio } = useDesperdicio(semanaId);
+  const { contagens } = useContagemRefeicoes();
+  const { estoque } = useEstoque();
+  const { ofertas } = useOfertas();
   const [periodo, setPeriodo] = useState<'semana' | 'mes' | 'tudo'>('semana');
 
-  /* Semanas do período selecionado */
+  const datasSemana = useMemo(
+    () => datasDaSemana(semanaId).map((d) => d.toISOString().slice(0, 10)),
+    [semanaId],
+  );
+
+  const inteligencia = useMemo(() => construirInteligenciaViva({
+    semanaId,
+    datasSemana,
+    estado,
+    precos,
+    estimativas,
+    fatores,
+    desperdicio,
+    contagens,
+    estoque,
+    ofertas,
+    fornecedores,
+    historicoPrecos: historico,
+    aceitacao,
+    lancamentos,
+  }), [
+    semanaId,
+    datasSemana,
+    estado,
+    precos,
+    estimativas,
+    fatores,
+    desperdicio,
+    contagens,
+    estoque,
+    ofertas,
+    fornecedores,
+    historico,
+    aceitacao,
+    lancamentos,
+  ]);
+
   const semanaIds = useMemo(() => {
     const todas = semanasComConteudo();
     if (periodo === 'semana') return [semanaId];
     if (periodo === 'mes') return todas.slice(-4);
     return todas;
-  }, [periodo, semanaId]);
+  }, [periodo, semanaId, estado]);
 
-  /* KPIs agregados */
+  const estadoDoPeriodo = (sid: string): EstadoSemana => sid === semanaId ? estado : lerSemana(sid);
+
   const kpis = useMemo(() => {
     let custoTotal = 0;
     let itensComprados = 0;
@@ -77,7 +128,7 @@ export function CentralGerencial({
     let totalRefeicoes = 0;
 
     for (const sid of semanaIds) {
-      const s = lerSemana(sid);
+      const s = sid === semanaId ? estado : lerSemana(sid);
       for (let di = 0; di < 7; di++) {
         const linhas = linhasDoDia(s, di, fatores);
         linhas.forEach((l) => {
@@ -97,17 +148,14 @@ export function CentralGerencial({
     }
 
     return { custoTotal, itensComprados, itensRecebidos, totalRefeicoes, semanas: semanaIds.length };
-  }, [semanaIds, precos, estimativas, fatores]);
+  }, [semanaIds, semanaId, estado, precos, estimativas, fatores]);
 
-  /* Índice nutricional da semana atual */
   const nutri = useMemo(() => indiceNutricionalSemana(estado.dias), [estado.dias]);
-
-  /* ---- Funções de exportação ---- */
 
   const exportarCompras = () => {
     const rows: string[][] = [['Semana', 'Dia', 'Item', 'Qtd Sugerida', 'Unid', 'Qtd Comprada', 'Preço Pago', 'Qtd Recebida', 'OK', 'Observação']];
     for (const sid of semanaIds) {
-      const s = lerSemana(sid);
+      const s = estadoDoPeriodo(sid);
       const per = periodoSemana(sid);
       for (let di = 0; di < 7; di++) {
         linhasDoDia(s, di, fatores).forEach((l) => {
@@ -152,7 +200,7 @@ export function CentralGerencial({
   const exportarCardapios = () => {
     const rows: string[][] = [['Semana', 'Período', 'Dia', 'Principal', 'Guarnicao', 'Salada', 'Sobremesa', 'Pessoas', 'Etapa']];
     for (const sid of semanaIds) {
-      const s = lerSemana(sid);
+      const s = estadoDoPeriodo(sid);
       const per = periodoSemana(sid);
       s.dias.forEach((d, i) => {
         rows.push([sid, per, DIAS_SEMANA[i], d.principal, d.guarnicao, d.salada, d.sobremesa, String(d.pessoas), s.etapa]);
@@ -173,7 +221,7 @@ export function CentralGerencial({
   const exportarNutricional = () => {
     const rows: string[][] = [['Semana', 'Score (%)', 'Classificação', 'Observações']];
     for (const sid of semanaIds) {
-      const s = lerSemana(sid);
+      const s = estadoDoPeriodo(sid);
       const { score, rotulo, detalhes } = indiceNutricionalSemana(s.dias);
       rows.push([periodoSemana(sid), String(score), rotulo, detalhes.join(' | ')]);
     }
@@ -183,7 +231,7 @@ export function CentralGerencial({
   const exportarCustos = () => {
     const rows: string[][] = [['Semana', 'Período', 'Custo Estimado (R$)', 'Custo Real (R$)', 'Refeições Previstas', 'Refeições Reais', 'Custo/Refeição (R$)']];
     for (const sid of semanaIds) {
-      const s = lerSemana(sid);
+      const s = estadoDoPeriodo(sid);
       let custoEst = 0;
       let custoReal = 0;
       let pessoasPrev = 0;
@@ -233,9 +281,10 @@ export function CentralGerencial({
 
   return (
     <div className="space-y-6">
-      {/* Cabeçalho narrativo */}
+      <PainelInteligenciaViva inteligencia={inteligencia} />
+
       <div className="space-y-1">
-        <p className="text-micro font-bold uppercase tracking-[0.18em] text-texto-suave">Central gerencial</p>
+        <p className="text-micro font-bold uppercase tracking-[0.18em] text-texto-suave">Histórico e exportação</p>
         <p className="text-lg font-extrabold text-carvao-900 dark:text-white">
           {kpis.semanas === 1
             ? 'Esta semana em números'
@@ -243,10 +292,9 @@ export function CentralGerencial({
             ? `Últimas ${kpis.semanas} semanas`
             : 'Histórico completo'}
         </p>
-        <p className="text-xs text-texto-suave">Exporte para Excel ou Google Sheets em CSV</p>
+        <p className="text-xs text-texto-suave">Os números acima reagem à operação; aqui você amplia o período e exporta a prova.</p>
       </div>
 
-      {/* Seletor de período */}
       <div className="flex gap-1 rounded-2xl bg-carvao-100/70 p-1 dark:bg-carvao-800/70">
         {([['semana', 'Esta semana'], ['mes', 'Último mês (4 sem.)'], ['tudo', 'Todo o histórico']] as const).map(([id, rot]) => (
           <button
@@ -259,10 +307,9 @@ export function CentralGerencial({
         ))}
       </div>
 
-      {/* Stats inline */}
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
         <span><strong className="font-bold text-carvao-900 dark:text-white">{kpis.semanas}</strong> <span className="text-texto-suave">semana{kpis.semanas !== 1 ? 's' : ''}</span></span>
-        <span><strong className="font-bold text-carvao-900 dark:text-white">{formatarReais(kpis.custoTotal)}</strong> <span className="text-texto-suave">em compras</span></span>
+        <span><strong className="font-bold text-carvao-900 dark:text-white">{formatarReais(kpis.custoTotal)}</strong> <span className="text-texto-suave">em compras registradas</span></span>
         <span><strong className="font-bold text-carvao-900 dark:text-white">{kpis.itensComprados}</strong> <span className="text-texto-suave">itens · {kpis.itensRecebidos} recebidos</span></span>
         {kpis.totalRefeicoes > 0 && <span><strong className="font-bold text-carvao-900 dark:text-white">{kpis.totalRefeicoes}</strong> <span className="text-texto-suave">refeições</span></span>}
         <span>
@@ -271,7 +318,6 @@ export function CentralGerencial({
         </span>
       </div>
 
-      {/* Relatórios exportáveis — agrupados */}
       <div className="space-y-4">
         <h3 className="text-caption font-extrabold uppercase tracking-[0.2em] text-texto-suave">Exportar relatórios (CSV)</h3>
         {GRUPOS_RELATORIOS.map((g) => (
@@ -297,7 +343,6 @@ export function CentralGerencial({
         ))}
       </div>
 
-      {/* Últimas ações (auditoria resumida) */}
       {auditoria.length > 0 && (
         <Cartao className="space-y-2">
           <h3 className="font-display text-sm font-bold">Últimas ações registradas</h3>
@@ -325,14 +370,12 @@ export function CentralGerencial({
         </Cartao>
       )}
 
-      {/* link para o manual */}
       <a
         href="/manual"
         target="_blank"
         rel="noopener noreferrer"
         className="flex items-center justify-center gap-2 rounded-2xl bg-brand-50 px-4 py-3 text-sm font-semibold text-brand-700 ring-1 ring-brand-200/60 transition hover:bg-brand-100 dark:bg-carvao-800 dark:text-brand-300 dark:ring-carvao-600"
       >
-        
         Manual do sistema — guia completo para funcionários
         <span className="text-brand-400">↗</span>
       </a>

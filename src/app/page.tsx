@@ -10,12 +10,12 @@ import { Icone } from '@/components/Icones';
 import { BottomSheet, Skeleton, Kpi } from '@/components/ui';
 import { resumoSemana } from '@/lib/cardapio/indicadores';
 import { formatarReais } from '@/lib/cardapio/motor';
+import { taxaMediaDesperdicio } from '@/lib/cardapio/desperdicio-metricas';
 
 /* Tela de Início (visão padrão pós-login) — eager para não piscar no
    primeiro paint. */
 import { AbaAgora } from '@/components/cardapio/AbaAgora';
 import { BriefingCard } from '@/components/cardapio/BriefingCard';
-import { PainelDiretor } from '@/components/cardapio/PainelDiretor';
 
 /* Demais abas — carregadas sob demanda (code-splitting). Cada uma vira um
    chunk separado, baixado só quando o usuário abre aquela aba. Isso tira do
@@ -48,7 +48,6 @@ const AbaCustoPrato = dynamic(() => import('@/components/cardapio/AbaCustoPrato'
 const AbaFornecedorIntel = dynamic(() => import('@/components/cardapio/AbaFornecedorIntel').then((m) => ({ default: m.AbaFornecedorIntel })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const AbaPedido = dynamic(() => import('@/components/cardapio/AbaPedido').then((m) => ({ default: m.AbaPedido })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 const CardapioOrientadoDados = dynamic(() => import('@/components/cardapio/CardapioOrientadoDados').then((m) => ({ default: m.CardapioOrientadoDados })), { ssr: false, loading: () => <Carregando h="h-64" /> });
-const CopilotoSemana = dynamic(() => import('@/components/cardapio/CopilotoSemana').then((m) => ({ default: m.CopilotoSemana })), { ssr: false, loading: () => null });
 const AbaGastos = dynamic(() => import('@/components/cardapio/AbaGastos').then((m) => ({ default: m.AbaGastos })), { ssr: false, loading: () => <Carregando h="h-64" /> });
 import {
   deslocarSemana,
@@ -80,7 +79,6 @@ import { useLogin, abasDoPapel } from '@/lib/cardapio/login';
 import { Login } from '@/components/Login';
 import { TourOnboarding } from '@/components/TourOnboarding';
 import { pode } from '@/lib/cardapio/org';
-import type { Etapa } from '@/lib/cardapio/tipos';
 
 /* ── abas ────────────────────────────────────────────────── */
 
@@ -93,68 +91,6 @@ const ABAS = [
 ] as const;
 
 type AbaId = (typeof ABAS)[number]['id'];
-
-/* ── badge de etapa ──────────────────────────────────────── */
-
-const ROTULO_ETAPA: Record<Etapa, string> = {
-  rascunho:    'Rascunho',
-  cozinha:     'Na cozinha',
-  compras:     'Em compra',
-  recebimento: 'Recebendo',
-  concluido:   'Concluída',
-};
-
-const COR_ETAPA_TEXTO: Record<Etapa, string> = {
-  rascunho:    'text-texto-suave',
-  cozinha:     'text-ouro-600 dark:text-ouro-400',
-  compras:     'text-info dark:text-info-claro',
-  recebimento: 'text-ouro-600 dark:text-ouro-400',
-  concluido:   'text-brand-600 dark:text-brand-400',
-};
-
-const COR_ETAPA_PONTO: Record<Etapa, string> = {
-  rascunho:    'bg-carvao-300',
-  cozinha:     'bg-ouro-400 animate-pulse',
-  compras:     'bg-info',
-  recebimento: 'bg-ouro-400 animate-pulse',
-  concluido:   'bg-brand-500',
-};
-
-/* ── mini-stepper de etapas — espinha dorsal visível em todas as telas ── */
-
-const SEQ_ETAPAS: Etapa[] = ['rascunho', 'cozinha', 'compras', 'recebimento', 'concluido'];
-
-function MiniEtapas({ etapa, sufixo }: { etapa: Etapa; sufixo?: string }) {
-  const atual = SEQ_ETAPAS.indexOf(etapa);
-  const proxima = atual >= 0 && atual < SEQ_ETAPAS.length - 1 ? SEQ_ETAPAS[atual + 1] : null;
-  return (
-    <div className="space-y-1.5" aria-label={`Etapa: ${ROTULO_ETAPA[etapa]}`}>
-      <div className="flex items-center gap-1.5">
-        {SEQ_ETAPAS.map((e, i) => (
-          <span
-            key={e}
-            className={`h-1.5 rounded-full transition-all ${
-              i === atual ? 'w-7 bg-brand-600' : i < atual ? 'w-4 bg-brand-600/50' : 'w-4 bg-carvao-200 dark:bg-carvao-700'
-            }`}
-            title={ROTULO_ETAPA[e]}
-          />
-        ))}
-      </div>
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-rotulo font-semibold">
-        <span className={`inline-flex items-center gap-1.5 ${COR_ETAPA_TEXTO[etapa]}`}>
-          <span className={`h-2 w-2 rounded-full ${COR_ETAPA_PONTO[etapa]}`} />
-          {ROTULO_ETAPA[etapa]}
-        </span>
-        {sufixo && <span className="font-normal text-texto-suave">· {sufixo}</span>}
-        {proxima && (
-          <span className="font-normal text-texto-suave">
-            · próximo: <span className="font-semibold text-carvao-500 dark:text-carvao-300">{ROTULO_ETAPA[proxima]}</span>
-          </span>
-        )}
-      </p>
-    </div>
-  );
-}
 
 /* ── busca global ────────────────────────────────────────── */
 
@@ -590,9 +526,10 @@ export default function PaginaCardapios() {
     let somaNotas = 0, nNotas = 0;
     Object.values(aceitacao).forEach((a) => { if (a.n > 0) { somaNotas += a.somaNotas; nNotas += a.n; } });
     const mediaAceit = nNotas > 0 ? somaNotas / nNotas : null;
-    let prod = 0, sobra = 0;
-    desperdicio.forEach((d) => { if (d.produzido > 0) { prod += d.produzido; sobra += Math.max(0, d.produzido - d.consumido); } });
-    const desperdicioPct = prod > 0 ? (sobra / prod) * 100 : null;
+    // Taxa média por lançamento: percentual é adimensional, então pode
+    // atravessar kg/porções sem jamais somar quantidades físicas incompatíveis.
+    const taxaDesperdicio = taxaMediaDesperdicio(desperdicio);
+    const desperdicioPct = taxaDesperdicio == null ? null : taxaDesperdicio * 100;
     return { custoSemana, custoRef, mediaAceit, desperdicioPct };
   }, [estado, precos, fatores, estimativas, aceitacao, desperdicio]);
 
@@ -754,12 +691,9 @@ export default function PaginaCardapios() {
             <h1 className="font-display text-2xl font-bold text-carvao-900 dark:text-white sm:text-3xl">
               {periodoSemana(semanaId)}
             </h1>
-            <div className="mt-2 max-w-xs">
-              <MiniEtapas
-                etapa={estado.etapa}
-                sufixo={semanaId === semanaAtualId ? 'semana atual' : 'semana planejada'}
-              />
-            </div>
+            <p className="mt-1 text-rotulo font-semibold text-texto-suave">
+              {semanaId === semanaAtualId ? 'Semana atual' : 'Semana planejada'}
+            </p>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -815,21 +749,6 @@ export default function PaginaCardapios() {
             {/* ── INÍCIO ────────────────────────────────────── */}
             {aba === 'agora' && (
               <div className="space-y-4">
-                {/* Painel do Diretor — leitura de 5s, só para gestão */}
-                {(papel === 'gestor' || papel === 'administrador') && (
-                  <>
-                    <PainelDiretor
-                      nome={perfil?.rotulo ?? 'Gestor'}
-                      precos={precos}
-                      historico={historico}
-                      fornecedores={fornecedores}
-                      perfis={perfisFornecedores}
-                      aceitacao={aceitacao}
-                      estoque={estoque}
-                    />
-                    <div className="h-px bg-gradient-to-r from-transparent via-carvao-200 to-transparent dark:via-carvao-700" />
-                  </>
-                )}
                 <BriefingCard
                   estado={estado}
                   semanaId={semanaId}
@@ -840,16 +759,6 @@ export default function PaginaCardapios() {
                   fornecedores={fornecedores}
                   onOpenIA={() => setIaAberta(true)}
                   nomeUsuario={perfil?.rotulo}
-                />
-                {/* Copiloto — o que fazer nesta semana, com número. Fica no
-                    Início de propósito: escondido numa aba de painel flutuante
-                    ninguém via, e o app parecia não ter mudado. */}
-                <CopilotoSemana
-                  estado={estado}
-                  semanaId={semanaId}
-                  precos={precos}
-                  estimativas={estimativas}
-                  onAbrirTudo={() => setIaAberta(true)}
                 />
 
                 <AbaAgora
@@ -1081,7 +990,7 @@ export default function PaginaCardapios() {
                 {/* sub-abas por TEMA — navegação por assunto, não dump vertical */}
                 <div className="flex gap-1 overflow-x-auto rounded-2xl bg-carvao-100 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:bg-carvao-800">
                   {([
-                    { id: 'gerencial',    rotulo: 'Visão geral',   curto: 'Visão' },
+                    { id: 'gerencial',    rotulo: 'Inteligência viva', curto: 'Viva' },
                     { id: 'custos',       rotulo: 'Custos',         curto: 'Custos' },
                     { id: 'rankings',     rotulo: 'DNA & Rankings', curto: 'DNA' },
                     { id: 'previsao',     rotulo: 'Previsão',       curto: 'Prev.' },
@@ -1103,6 +1012,10 @@ export default function PaginaCardapios() {
                     </button>
                   ))}
                 </div>
+
+                <p className="text-xs leading-5 text-texto-suave">
+                  Atualiza com a operação: compras, notas fiscais, refeições, estoque, desperdício, preços, ofertas e aceitação entram na leitura sem precisar gerar um relatório novo.
+                </p>
 
                 {abaRelatorios === 'gerencial' && (
                   <CentralGerencial

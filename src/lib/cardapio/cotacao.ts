@@ -32,6 +32,8 @@ export interface LinhaCotacao {
   /** Unidade incompatível com o padrão: preço NÃO pode ser aplicado. */
   bloqueado?: boolean;
   origemHistorico?: string | null;
+  conservacao?: 'resfriado' | 'congelado' | null;
+  origem?: 'texto' | 'estruturado' | 'ia';
 }
 
 export interface ItemCotado {
@@ -345,6 +347,64 @@ function buildContextoHistorico(): string {
   return `PREÇOS REAIS TATÁ HOUSE (Mai/Jun 2026 — use para validar, nunca para inventar):\n${linhas.join('\n')}`;
 }
 
+
+function unidadeEstruturada(valor: string | undefined): string | null {
+  const n = normalizar(valor ?? '').replace(/\s+/g, ' ');
+  if (!n || n === 'nao informado' || n === 'nao informada' || n === 'n/a') return null;
+  const mapa: Record<string, string> = {
+    und: 'un', unid: 'un', unidade: 'un', bdj: 'bd', bandeja: 'bd', pacote: 'pct',
+    pcte: 'pct', litro: 'lt', litros: 'lt', l: 'lt', caixa: 'cx', saco: 'sc',
+    maco: 'mc', peca: 'pc',
+  };
+  const u = mapa[n] ?? n;
+  return UNIDADES.has(u) ? u : null;
+}
+
+function precoEstruturado(valor: string | undefined): number {
+  if (!valor) return 0;
+  const limpo = valor.replace(/R\$/gi, '').replace(/\s+/g, '').trim();
+  if (!limpo) return 0;
+  if (/,\d{1,2}$/.test(limpo)) return Number(limpo.replace(/\./g, '').replace(',', '.'));
+  const n = Number(limpo.replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function conservacaoEstruturada(valor: string | undefined): 'resfriado' | 'congelado' | null {
+  const n = normalizar(valor ?? '');
+  if (/^(rf|resf|resfriado|resfriada)$/.test(n)) return 'resfriado';
+  if (/^(cg|cong|congelado|congelada|congelados)$/.test(n)) return 'congelado';
+  return null;
+}
+
+/** formato canônico estruturado: metadado nunca vira nome de produto. */
+function parsearLinhaEstruturada(
+  linha: string,
+  fornecedorConhecido: (s: string) => string | null,
+): LinhaCotacao | null {
+  const campos: Record<string, string> = {};
+  for (const parte of linha.split('|')) {
+    const pos = parte.indexOf('=');
+    if (pos <= 0) continue;
+    const chave = normalizar(parte.slice(0, pos)).replace(/\s+/g, '_');
+    const valor = parte.slice(pos + 1).trim();
+    if (chave && valor) campos[chave] = valor;
+  }
+
+  const produto = (campos.produto ?? campos.item ?? campos.nome ?? '').trim();
+  const preco = precoEstruturado(campos.preco);
+  if (!produto || !(preco > 0)) return null;
+
+  const fornecedorRaw = (campos.fornecedor ?? '').trim();
+  const marcaRaw = (campos.marca ?? '').trim();
+  let marca: string | null = null;
+  if (fornecedorRaw && !ehRemetenteInterno(fornecedorRaw)) marca = fornecedorConhecido(fornecedorRaw) ?? fornecedorRaw;
+  else if (marcaRaw && !ehRemetenteInterno(marcaRaw)) marca = fornecedorConhecido(marcaRaw) ?? marcaRaw;
+
+  const unid = unidadeEstruturada(campos.unidade_preco ?? campos.unidade ?? campos.unid);
+  const conservacao = conservacaoEstruturada(campos.conservacao ?? campos.estado);
+  return validarLinha({ nome: produto, preco, marca, unid, item: casarItem(produto), conservacao, origem: 'estruturado' });
+}
+
 export function parsearCotacao(texto: string, fornecedoresCustom: string[] = []): LinhaCotacao[] {
   const linhas: LinhaCotacao[] = [];
   let fornecedorSecao: string | null = null;
@@ -360,6 +420,15 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
     }
     const linhaLimpa = limparLinha(bruta);
     if (!linhaLimpa || linhaLimpa.length < 2) continue;
+
+    if (/^(importante|legenda|observa(?:cao|ção)|obs)\s*[:\-]/i.test(linhaLimpa)) continue;
+
+    const pareceEstruturada = /(?:^|\|)\s*(?:id|fornecedor|produto|item|nome|preco|unidade_preco|conservacao|estado)\s*=/i.test(linhaLimpa);
+    if (pareceEstruturada) {
+      const estruturada = parsearLinhaEstruturada(linhaLimpa, fornecedorConhecido);
+      if (estruturada) linhas.push(estruturada);
+      continue;
+    }
 
     // Quebra linhas multi-item ("A KG 1,00 B KG 2,00") em uma por item.
     for (const linha of separarMultiItens(linhaLimpa)) {
@@ -437,7 +506,14 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
       marca = fornecedorSecao;
     }
 
-    const novaLinha: LinhaCotacao = { nome, preco, marca, unid, item: casarItem(nome) };
+    const brutoConservacao = normalizar(linhaItem);
+    const conservacao = /\b(rf|resf|resfriado|resfriada)\b/.test(brutoConservacao)
+      ? 'resfriado' as const
+      : /\b(cg|cong|congelado|congelada|congelados)\b/.test(brutoConservacao)
+        ? 'congelado' as const
+        : null;
+    nome = nome.replace(/\b(RF|CG|RESF|RESFRIAD[OA]|CONG|CONGELAD[OA]S?)\b/gi, '').replace(/\s+/g, ' ').trim();
+    const novaLinha: LinhaCotacao = { nome, preco, marca, unid, item: casarItem(nome), conservacao, origem: 'texto' };
     linhas.push(validarLinha(novaLinha));
     } // fim do loop de sub-itens da linha
   }
@@ -446,7 +522,6 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
 
 /* ------------------- integração Gemini IA ----------------------------- */
 
-const GROQ_MODELO = 'llama-3.3-70b-versatile';
 
 function buildPromptIA(fornecedores: string[]): string {
   const listForn = fornecedores.length
@@ -497,27 +572,10 @@ function parseItensIA(txt: string): LinhaCotacao[] {
         marca: marca && !ehRemetenteInterno(marca) ? marca : null,
         unid: null,
         item: casarItem(it.nome),
+        conservacao: null,
+        origem: 'ia' as const,
       };
     });
-}
-
-async function chamarGroqDireto(prompt: string, apiKey: string): Promise<string> {
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: GROQ_MODELO,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-    }),
-  });
-  if (!resp.ok) {
-    const err: { error?: { message?: string } } = await resp.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `HTTP ${resp.status}`);
-  }
-  const data: { choices?: { message?: { content?: string } }[] } = await resp.json();
-  return data?.choices?.[0]?.message?.content ?? '{}';
 }
 
 /**
@@ -549,6 +607,8 @@ function combinarResultados(logica: LinhaCotacao[], ia: LinhaCotacao[]): LinhaCo
       marca: l.marca || par?.marca || null,
       unid: l.unid,
       item: l.item || par?.item || null,
+      conservacao: l.conservacao ?? par?.conservacao ?? null,
+      origem: l.origem ?? par?.origem ?? 'texto',
     };
     return validarLinha(merged);
   });
@@ -569,16 +629,15 @@ function combinarResultados(logica: LinhaCotacao[], ia: LinhaCotacao[]): LinhaCo
  */
 export async function parsearCotacaoComIA(
   texto: string,
-  apiKey: string,
   fornecedoresCustom: string[] = [],
 ): Promise<{ linhas: LinhaCotacao[]; comIA: boolean; erroIA?: string }> {
   const logica = parsearCotacao(texto, fornecedoresCustom);
   const prompt = buildGroqPrompt(texto, fornecedoresCustom);
+  if (!iaEdgeAtivo()) {
+    return { linhas: logica, comIA: false, erroIA: 'IA segura do servidor não configurada; leitura lógica preservada.' };
+  }
   try {
-    // Edge Function (chave no servidor) quando ativada; senão, Groq direto.
-    const txt = iaEdgeAtivo()
-      ? await chamarEdge('groq', '', prompt, true)
-      : await chamarGroqDireto(prompt, apiKey);
+    const txt = await chamarEdge('groq', '', prompt, true);
     return { linhas: combinarResultados(logica, parseItensIA(txt)), comIA: true };
   } catch (e) {
     return { linhas: logica, comIA: false, erroIA: e instanceof Error ? e.message : String(e) };
@@ -630,7 +689,7 @@ export function agruparCotacao(
     if (!atual) {
       porItem.set(l.item, {
         item: l.item,
-        unid: unidadeDoItem.get(l.item) ?? extra?.u ?? l.unid ?? 'kg',
+        unid: unidadeDoItem.get(l.item) ?? extra?.u ?? l.unid ?? '',
         preco: l.preco,
         marca: l.marca,
         ofertas: 1,
@@ -643,7 +702,11 @@ export function agruparCotacao(
       });
     } else {
       atual.ofertas++;
-      if (l.preco < atual.preco) {
+      const atualBloqueado = !!atual.bloqueado;
+      const novoBloqueado = !!l.bloqueado;
+      const deveTrocar = (atualBloqueado && !novoBloqueado)
+        || (atualBloqueado === novoBloqueado && l.preco < atual.preco);
+      if (deveTrocar) {
         atual.preco = l.preco;
         atual.marca = l.marca;
         atual.precoHistorico = l.precoHistorico;

@@ -1,9 +1,12 @@
 'use client';
 
 /* =====================================================================
-   Leitura de nota fiscal por foto — Groq Vision (llama-3.2-90b).
-   A chave é passada pelo chamador (nunca hardcoded nem em env vars).
+   Leitura de nota fiscal por foto — IA multimodal via Edge Function segura.
+   O navegador envia somente a imagem comprimida e nunca recebe segredo de
+   Gemini/Groq/OpenAI/Anthropic.
    ===================================================================== */
+
+import { chamarEdge, iaEdgeAtivo } from './ia-cliente';
 
 export interface ItemNotaExtraido {
   produto: string;
@@ -22,7 +25,6 @@ export interface ResultadoLeituraNF {
   erro?: string;
 }
 
-const GROQ_VISION_MODELO = 'llama-3.2-90b-vision-preview';
 
 const PROMPT_NF = `Você é um sistema OCR especializado em notas fiscais brasileiras (NF-e, Cupom Fiscal, NF de produtor rural).
 Extraia os dados estruturados da imagem e retorne APENAS JSON neste formato:
@@ -45,53 +47,16 @@ Regras:
 export async function lerNotaFiscalViaIA(
   base64: string,
   mimeType: string,
-  groqKey: string,
 ): Promise<ResultadoLeituraNF> {
-  if (!groqKey?.trim()) {
-    return { itens: [], erro: 'Chave Groq não configurada. Configure em Cotação → IA Groq.' };
+  if (!iaEdgeAtivo()) {
+    return { itens: [], erro: 'IA segura do servidor não configurada.' };
+  }
+  if (!base64 || !/^image\/(jpeg|jpg|png|webp)$/i.test(mimeType)) {
+    return { itens: [], erro: 'Imagem inválida para leitura da nota fiscal.' };
   }
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${groqKey}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_VISION_MODELO,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: { url: `data:${mimeType};base64,${base64}` },
-              },
-              {
-                type: 'text',
-                text: PROMPT_NF,
-              },
-            ],
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.1,
-        max_tokens: 3000,
-      }),
-    });
-
-    if (!res.ok) {
-      const corpo = await res.text().catch(() => res.statusText);
-      let mensagem = `Groq ${res.status}: ${corpo}`;
-      if (res.status === 401) mensagem = 'Chave Groq inválida. Verifique em console.groq.com/keys.';
-      if (res.status === 429) mensagem = 'Limite de requisições atingido. Aguarde um momento.';
-      return { itens: [], erro: mensagem };
-    }
-
-    const json = await res.json();
-    const texto: string = json.choices?.[0]?.message?.content ?? '{}';
-
+    const texto = await chamarEdge('gemini', '', PROMPT_NF, true, { base64, mimeType });
     let dados: ResultadoLeituraNF;
     try {
       dados = JSON.parse(texto) as ResultadoLeituraNF;
@@ -100,9 +65,21 @@ export async function lerNotaFiscalViaIA(
       dados = match ? (JSON.parse(match[0]) as ResultadoLeituraNF) : { itens: [] };
     }
 
-    return { ...dados, itens: dados.itens ?? [] };
+    const itens = Array.isArray(dados.itens)
+      ? dados.itens
+          .filter((it) => !!it && typeof it.produto === 'string' && Number(it.qtd) >= 0 && Number(it.precoUnit) >= 0 && Number(it.precoTotal) >= 0)
+          .map((it) => ({
+            produto: it.produto.trim(),
+            qtd: Number(it.qtd) || 0,
+            unid: String(it.unid || 'UN').toUpperCase(),
+            precoUnit: Number(it.precoUnit) || 0,
+            precoTotal: Number(it.precoTotal) || 0,
+          }))
+      : [];
+
+    return { ...dados, itens };
   } catch (e) {
-    return { itens: [], erro: String(e) };
+    return { itens: [], erro: e instanceof Error ? e.message : String(e) };
   }
 }
 

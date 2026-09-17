@@ -32,6 +32,7 @@ interface Corpo {
   system?: string;
   prompt?: string;
   json?: boolean;
+  image?: { base64?: string; mimeType?: string };
 }
 
 // @ts-expect-error — Deno é o runtime da Edge Function (não tipado neste repo)
@@ -45,8 +46,14 @@ Deno.serve(async (req: Request) => {
   } catch {
     return json({ error: 'JSON inválido' }, 400);
   }
-  const { provider = 'gemini', system, prompt, json: comoJson } = corpo;
+  const { provider = 'gemini', system, prompt, json: comoJson, image } = corpo;
   if (!prompt) return json({ error: 'prompt ausente' }, 400);
+  if (image) {
+    if (provider !== 'gemini') return json({ error: 'imagem suportada apenas pelo provider multimodal aprovado' }, 400);
+    if (!image.base64 || !image.mimeType) return json({ error: 'imagem incompleta' }, 400);
+    if (!/^image\/(jpeg|jpg|png|webp)$/i.test(image.mimeType)) return json({ error: 'tipo de imagem não suportado' }, 415);
+    if (image.base64.length > 8_000_000) return json({ error: 'imagem excede o limite seguro' }, 413);
+  }
 
   // @ts-expect-error — Deno.env só existe no runtime da função
   const env = (n: string): string | undefined => Deno.env.get(n);
@@ -83,7 +90,7 @@ Deno.serve(async (req: Request) => {
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
           ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts: [...(image ? [{ inlineData: { mimeType: image.mimeType!, data: image.base64! } }] : []), { text: prompt }] }],
           generationConfig: {
             maxOutputTokens: 800,
             ...(comoJson ? { responseMimeType: 'application/json' } : {}),

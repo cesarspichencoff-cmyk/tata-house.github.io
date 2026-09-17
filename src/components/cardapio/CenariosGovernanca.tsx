@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { DIAS_SEMANA, formatarReais } from '@/lib/cardapio/motor';
 import {
   aplicarCenarioAoEstado,
-  gerarCenariosGovernanca,
   type CenarioGovernanca,
 } from '@/lib/cardapio/governanca-candidatos';
-import type { Aceitacao, EstadoSemana } from '@/lib/cardapio/tipos';
+import { gerarCenariosMultiobjetivo } from '@/lib/cardapio/planejador-multiobjetivo';
+import type { Aceitacao, EstadoSemana, EventoDemanda, HistoricoPrecos, RegistroDesperdicio } from '@/lib/cardapio/tipos';
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -17,6 +17,18 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
       {hint && <p className="mt-0.5 text-[10px] leading-4 text-texto-suave">{hint}</p>}
     </div>
   );
+}
+
+function mDemand(cenario: CenarioGovernanca): string {
+  if (cenario.demanda.eventosRevisao > 0) return `${cenario.demanda.eventosRevisao} para revisar`;
+  if (cenario.demanda.eventosAplicados > 0) return `${cenario.demanda.eventosAplicados} ajustado${cenario.demanda.eventosAplicados === 1 ? '' : 's'}`;
+  return 'Sem ajuste';
+}
+
+function hDemand(cenario: CenarioGovernanca): string {
+  if (cenario.demanda.eventosRevisao > 0) return 'evento fechado/ambíguo exige decisão humana';
+  if (cenario.demanda.ajustesHumanosPreservados > 0) return `${cenario.demanda.ajustesHumanosPreservados} ajuste(s) humano(s) preservado(s)`;
+  return cenario.demanda.eventosAplicados > 0 ? 'fator aplicado só sobre baseline automático' : 'demanda automática preservada';
 }
 
 function CardCenario({
@@ -68,6 +80,26 @@ function CardCenario({
           hint={`${m.pratosComAceitacao}/7 principais · ${m.votosAceitacao} voto(s)`}
         />
         <Metric
+          label="Restrições"
+          value={m.ocorrenciasRestricao > 0 ? `${m.ocorrenciasRestricao} conflito${m.ocorrenciasRestricao === 1 ? '' : 's'}` : 'Sem conflito local'}
+          hint={m.ocorrenciasRestricao > 0 ? `${m.pessoasRestricaoSomadas} impacto(s) pessoa-dia` : 'módulo de funcionários do House'}
+        />
+        <Metric
+          label="Desperdício"
+          value={m.desperdicioMedioPct === null ? 'Sem amostra' : `${m.desperdicioMedioPct}%`}
+          hint={m.desperdicioMedioPct === null ? 'histórico House ainda insuficiente' : `${m.pratosComDesperdicio}/7 principais · ${m.amostraDesperdicio} registro(s)`}
+        />
+        <Metric
+          label="Preço em alta"
+          value={m.itensPrecoAlta > 0 ? `${m.itensPrecoAlta} insumo${m.itensPrecoAlta === 1 ? '' : 's'}` : 'Sem alerta'}
+          hint={m.itensPrecoAlta > 0 && m.maiorAltaPrecoPct !== null ? `maior alta ${m.maiorAltaPrecoPct}% · sinal sem dupla penalização` : 'radar House · limiar de alta anormal'}
+        />
+        <Metric
+          label="Demanda"
+          value={mDemand(cenario)}
+          hint={hDemand(cenario)}
+        />
+        <Metric
           label="Repetição recente"
           value={`${m.pratosRecentes}/7`}
           hint={`${m.ocorrenciasRecentes} ocorrência(s) no recorte`}
@@ -106,7 +138,7 @@ function CardCenario({
         onClick={aoAplicar}
         className="mt-4 rounded-xl bg-carvao-900 px-4 py-2.5 text-sm font-extrabold text-white transition hover:bg-carvao-700 dark:bg-areia-100 dark:text-carvao-900 dark:hover:bg-white"
       >
-        {m.erros > 0 ? 'Aplicar e corrigir no rascunho' : 'Aplicar este cenário'}
+        {m.erros > 0 || m.ocorrenciasRestricao > 0 ? 'Aplicar e corrigir no rascunho' : 'Aplicar este cenário'}
       </button>
     </article>
   );
@@ -122,6 +154,12 @@ export function CenariosGovernanca({
   aceitacao,
   frequencia,
   estoque,
+  restricoesEquipe,
+  desperdicioHistorico,
+  historicoPrecos,
+  baselineAutomatico,
+  eventos,
+  datasSemana,
 }: {
   estado: EstadoSemana;
   atualizar: (fn: (estado: EstadoSemana) => EstadoSemana) => void;
@@ -132,13 +170,19 @@ export function CenariosGovernanca({
   aceitacao: Aceitacao;
   frequencia: Record<string, number>;
   estoque: Record<string, number>;
+  restricoesEquipe: Record<string, number>;
+  desperdicioHistorico: RegistroDesperdicio[];
+  historicoPrecos: HistoricoPrecos;
+  baselineAutomatico: number[];
+  eventos: EventoDemanda[];
+  datasSemana: string[];
 }) {
   const [cenarios, setCenarios] = useState<CenarioGovernanca[]>([]);
   const [aplicado, setAplicado] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState('');
 
   const gerar = () => {
-    const novos = gerarCenariosGovernanca({
+    const novos = gerarCenariosMultiobjetivo({
       estado,
       precos,
       estimativas,
@@ -147,13 +191,19 @@ export function CenariosGovernanca({
       aceitacao,
       frequencia,
       estoque,
+      restricoesEquipe,
+      desperdicioHistorico,
+      historicoPrecos,
+      baselineAutomatico,
+      eventos,
+      datasSemana,
     });
     setCenarios(novos);
     setAplicado(null);
     setMensagem(
       novos.length === 3
-        ? 'Três estratégias prontas. Compare antes de mudar o rascunho.'
-        : `O motor conseguiu formar ${novos.length} cenário(s) válido(s) com os dados carregados.`,
+        ? 'Três estratégias multiobjetivo prontas. Compare antes de mudar o rascunho.'
+        : `O planejador conseguiu formar ${novos.length} cenário(s) válido(s) com os dados carregados.`,
     );
   };
 
@@ -179,10 +229,10 @@ export function CenariosGovernanca({
     <section data-testid="comparador-cenarios" className="rounded-3xl border border-carvao-100 bg-gradient-to-b from-white to-areia-50/50 p-4 shadow-sm dark:border-carvao-800 dark:from-carvao-900 dark:to-carvao-950/40 md:p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="max-w-2xl">
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Compare antes de montar</p>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-brand-600">Planejamento multiobjetivo</p>
           <h2 className="mt-1 font-display text-xl font-bold tracking-tight">Compare 3 estratégias para a mesma semana</h2>
           <p className="mt-2 text-sm leading-6 text-texto-suave">
-            Compare propostas com custo, regras, aceitação e histórico. Nenhum cenário vira cardápio sozinho.
+            O novo motor não sorteia semanas. Ele compara custo por ingrediente, aceitação, estoque, desperdício, demanda, repetição, nutrição, restrições e carga operacional antes de propor cada cenário.
           </p>
         </div>
         <button
@@ -191,7 +241,7 @@ export function CenariosGovernanca({
           onClick={gerar}
           className="shrink-0 rounded-2xl bg-brand-600 px-5 py-3 text-sm font-extrabold text-white transition hover:bg-brand-700"
         >
-          {cenarios.length ? 'Gerar 3 novos cenários' : 'Comparar 3 cenários'}
+          {cenarios.length ? 'Recalcular 3 cenários' : 'Comparar 3 cenários'}
         </button>
       </div>
 
@@ -211,7 +261,7 @@ export function CenariosGovernanca({
       )}
 
       <div className="mt-4 rounded-2xl border border-dashed border-carvao-200 px-4 py-3 text-xs leading-5 text-texto-suave dark:border-carvao-700">
-        Aplicar altera apenas esta <strong>proposta</strong>. Nada é publicado sem sua revisão e aprovação.
+        O motor só propõe. Aplicar altera esta <strong>proposta</strong>; nada é publicado sem revisão e decisão humana.
       </div>
     </section>
   );

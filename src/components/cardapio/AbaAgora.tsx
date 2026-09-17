@@ -318,6 +318,20 @@ export function AbaAgora({ estado, precos, aceitacao, fatores, papel, irPara }: 
         )}
       </div>
 
+      {(papel === 'gestor' || papel === 'administrador') && (
+        <button
+          type="button"
+          onClick={() => irPara('relatorios')}
+          className="flex w-full items-center justify-between rounded-2xl border border-carvao-100 bg-carvao-50 px-4 py-3 text-left transition hover:border-brand-200 hover:bg-brand-50 dark:border-carvao-800 dark:bg-carvao-900 dark:hover:border-brand-900 dark:hover:bg-brand-950/20"
+        >
+          <span>
+            <span className="block text-sm font-bold text-carvao-900 dark:text-white">Inteligência da semana</span>
+            <span className="mt-0.5 block text-xs text-texto-suave">Cruza compra, NF, refeições, estoque, desperdício, preços e aceitação.</span>
+          </span>
+          <Icone nome="proximo" tam={15} className="shrink-0 text-brand-600" />
+        </button>
+      )}
+
       {/* Números de apoio — etapas intermediárias */}
       {(etapa === 'cozinha' || etapa === 'compras' || etapa === 'recebimento') &&
         (resumo.refeicoesPrevistas > 0 || resumo.custoRefEstimado) && (

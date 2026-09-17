@@ -1,14 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('@/lib/cardapio/aviso-armazenamento', () => ({
-  useArmazenamentoLocalCheio: () => false,
-}));
-
-vi.mock('@/lib/cardapio/supabase', () => ({
-  useStatusNuvem: () => ({ status: 'ok', erroDesde: null, pendentes: 0 }),
-}));
-
-import { mensagemArmazenamentoCheio } from './AvisoCritico';
+import { describe, expect, it } from 'vitest';
+import {
+  armazenamentoCheioMasConfirmadoNaNuvem,
+  mensagemArmazenamentoCheio,
+} from '../lib/cardapio/aviso-critico';
 
 describe('AvisoCritico', () => {
   it('nao promete preservacao quando cache cheio e nuvem falha', () => {
@@ -24,8 +18,20 @@ describe('AvisoCritico', () => {
     expect(mensagem).toContain('pode existir apenas nesta tela');
   });
 
-  it('mesmo sem erro de nuvem exige confirmacao antes de chamar a alteracao de salva', () => {
+  it('durante sincronizacao ainda exige confirmacao antes de chamar a alteracao de salva', () => {
     const mensagem = mensagemArmazenamentoCheio('sincronizando', 1);
     expect(mensagem).toContain('só deve ser considerada salva depois da confirmação da nuvem');
+  });
+
+  it('com nuvem online e zero pendencias informa que o dado operacional esta confirmado', () => {
+    expect(armazenamentoCheioMasConfirmadoNaNuvem('online', 0)).toBe(true);
+    const mensagem = mensagemArmazenamentoCheio('online', 0);
+    expect(mensagem).toContain('alterações operacionais estão confirmadas na nuvem');
+    expect(mensagem).toContain('modo offline');
+    expect(mensagem).not.toContain('Evite fechar esta tela');
+  });
+
+  it('online com pendencia continua sendo risco e nao vira estado confirmado', () => {
+    expect(armazenamentoCheioMasConfirmadoNaNuvem('online', 1)).toBe(false);
   });
 });

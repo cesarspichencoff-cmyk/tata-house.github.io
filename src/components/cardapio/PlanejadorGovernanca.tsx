@@ -5,19 +5,25 @@ import { AbaCardapio } from './AbaCardapio';
 import { CardapioOrientadoDados } from './CardapioOrientadoDados';
 import { CenariosGovernanca } from './CenariosGovernanca';
 import {
+  datasDaSemana,
+  lerDesperdicio,
   lerSemana,
+  semanaVazia,
   semanasComConteudo,
   useAceitacao,
   useAprendizado,
   useEstoque,
+  useEventos,
   useFornecedores,
+  useFuncionarios,
   useHistoricoPrecos,
   useItensExtras,
+  useOfertas,
   usePrecos,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
-import { normalizar } from '@/lib/cardapio/motor';
 import { useSemanaGovernancaShadow } from '@/lib/cardapio/use-semana-governanca-shadow';
+import { listaDoDia, normalizar } from '@/lib/cardapio/motor';
 import {
   avaliarProntidaoPlanejamento,
   construirDraftPlanejamentoGovernanca,
@@ -30,6 +36,19 @@ import {
   instalarHandoffEvidenciaReadOnly,
   type EvidenciaGovernancaReadOnlyV1,
 } from '@/lib/cardapio/governanca-readonly';
+import {
+  instalarHandoffRestricoesGovernanca,
+  itensDaSemanaParaRestricoes,
+  restricoesLocaisAgregadas,
+  solicitarRestricoesGovernanca,
+  type SnapshotRestricoesGovernancaV1,
+} from '@/lib/cardapio/governanca-restricoes';
+import {
+  estoqueOficialParaPlanejamento,
+  instalarHandoffEstoqueGovernanca,
+  solicitarEstoqueGovernanca,
+  type SnapshotEstoqueGovernancaV1,
+} from '@/lib/cardapio/governanca-estoque-oficial';
 
 function novoId(prefixo: string): string {
   try {
@@ -126,18 +145,20 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [envio, setEnvio] = useState<'ocioso' | 'enviando' | 'confirmado' | 'erro'>('ocioso');
   const [mensagemEnvio, setMensagemEnvio] = useState('');
   const [evidenciaReadOnly, setEvidenciaReadOnly] = useState<EvidenciaGovernancaReadOnlyV1 | null>(null);
+  const [restricoesOficiais, setRestricoesOficiais] = useState<SnapshotRestricoesGovernancaV1 | null>(null);
+  const [estoqueOficial, setEstoqueOficial] = useState<SnapshotEstoqueGovernancaV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
-  // Coexistência segura: a semana real é somente a semente. Toda edição da
-  // superfície de Governança acontece numa cópia destacada em memória e não
-  // chama o updater persistente de useSemana.
   const { estado, atualizar, pronto } = useSemanaGovernancaShadow(contexto.semanaId);
-  const { precos } = usePrecos();
-  const { fornecedores } = useFornecedores();
-  const { itensExtras } = useItensExtras();
+  const { precos, definirPreco } = usePrecos();
+  const { fornecedores, definirFornecedor } = useFornecedores();
+  const { registrarOferta } = useOfertas();
+  const { itensExtras, cadastrarItem } = useItensExtras();
   const { fatores } = useAprendizado();
   const { aceitacao } = useAceitacao();
   const { estoque } = useEstoque();
+  const { eventos } = useEventos();
+  const { funcionarios } = useFuncionarios();
   const { estimativas } = useEstimativas();
   const historico = useHistoricoPrecos();
 
@@ -161,9 +182,28 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     return cont;
   }, [contexto.semanaId, evidenciaReadOnly]);
 
-  const estoqueQuantidade = useMemo(() => Object.fromEntries(
+  const estoqueLocalQuantidade = useMemo(() => Object.fromEntries(
     Object.entries(estoque).map(([chave, item]) => [chave, item.qtd]),
   ), [estoque]);
+  const itensEstoqueOficial = useMemo(() => {
+    const vistos = new Map<string, string>();
+    estado.dias.forEach((dia) => {
+      listaDoDia(dia, fatores).forEach((item) => {
+        const chave = normalizar(item.item);
+        if (chave && !vistos.has(chave)) vistos.set(chave, item.item);
+      });
+    });
+    return Array.from(vistos.values());
+  }, [estado.dias, fatores]);
+  const estoqueQuantidade = useMemo(() => ({
+    ...estoqueLocalQuantidade,
+    ...estoqueOficialParaPlanejamento(estoqueOficial, contexto.unidadeFonte),
+  }), [estoqueLocalQuantidade, estoqueOficial, contexto.unidadeFonte]);
+
+  const restricoesEquipe = useMemo(() => restricoesLocaisAgregadas(funcionarios), [funcionarios]);
+  const baselineAutomatico = useMemo(() => semanaVazia().dias.map((d) => d.pessoas), []);
+  const datasSemana = useMemo(() => datasDaSemana(contexto.semanaId).map((d) => d.toISOString().slice(0, 10)), [contexto.semanaId]);
+  const desperdicioHistorico = semanasComConteudo().flatMap((sid) => lerDesperdicio(sid));
 
   const prontidao = useMemo(
     () => avaliarProntidaoPlanejamento(estado.dias, precos),
@@ -175,6 +215,39 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     semanaEsperada: contexto.semanaId,
     aoEvidencia: setEvidenciaReadOnly,
   }), [contexto.semanaId, contexto.unidadeFonte]);
+
+  useEffect(() => instalarHandoffRestricoesGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setRestricoesOficiais,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+
+  useEffect(() => instalarHandoffEstoqueGovernanca({
+    unidadeEsperada: contexto.unidadeFonte,
+    semanaEsperada: contexto.semanaId,
+    aoSnapshot: setEstoqueOficial,
+  }), [contexto.semanaId, contexto.unidadeFonte]);
+
+  useEffect(() => {
+    const itens = itensDaSemanaParaRestricoes(estado.dias);
+    if (!itens.length) { setRestricoesOficiais(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarRestricoesGovernanca({ unidade: contexto.unidadeFonte, semanaId: contexto.semanaId, itens });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, estado.dias]);
+
+  useEffect(() => {
+    if (!itensEstoqueOficial.length) { setEstoqueOficial(null); return; }
+    const timer = window.setTimeout(() => {
+      solicitarEstoqueGovernanca({
+        unidade: contexto.unidadeFonte,
+        semanaId: contexto.semanaId,
+        itens: itensEstoqueOficial,
+      });
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [contexto.semanaId, contexto.unidadeFonte, itensEstoqueOficial]);
 
   useEffect(() => instalarHandoffPlanejadorGovernanca({
     aoContexto: () => {},
@@ -209,7 +282,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
     return (
       <main className="min-h-screen bg-areia-50 px-4 py-10 dark:bg-carvao-950">
         <div className="mx-auto max-w-4xl rounded-3xl bg-white p-8 text-sm text-texto-suave shadow-sm dark:bg-carvao-900">
-          Carregando estado operacional da semana sem liberar escrita…
+          Carregando estado operacional da semana…
         </div>
       </main>
     );
@@ -225,13 +298,21 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
           alertas={prontidao.alertas}
         />
 
-        <section data-testid="governanca-shadow-isolado" className="rounded-2xl border border-ouro-200 bg-ouro-50/80 px-4 py-3 text-sm leading-6 text-ouro-900 dark:border-ouro-800 dark:bg-ouro-950/20 dark:text-ouro-100">
-          <strong>Modo de transição isolado:</strong> mudanças de cardápio feitas aqui ficam somente nesta proposta e não alteram a semana operacional nem a lista de compras do TATÁ House em uso. Recarregar a página descarta o rascunho local não enviado.
-        </section>
+        {restricoesOficiais && (
+          <section data-testid="restricoes-oficiais-plus" className={`rounded-2xl border px-4 py-3 text-sm ${restricoesOficiais.conflitos.length > 0 ? 'border-red-200 bg-red-50/80 text-red-800 dark:border-red-900 dark:bg-red-950/20 dark:text-red-200' : 'border-brand-100 bg-brand-50/70 text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100'}`}>
+            <strong>Restrições oficiais do TATÁ Plus:</strong> {restricoesOficiais.conflitos.length > 0 ? `${restricoesOficiais.conflitos.length} pessoa(s) com conflito na composição atual. Revise antes de aprovar.` : 'nenhum conflito encontrado na composição atual.'}
+          </section>
+        )}
 
         {evidenciaReadOnly && (
           <section data-testid="evidencia-readonly-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
             <strong>Histórico oficial carregado:</strong> {evidenciaReadOnly.dias.length} dia(s) · {evidenciaReadOnly.principais.length} principal(is) agregados · {evidenciaReadOnly.periodo.de.split('-').reverse().join('/')} a {evidenciaReadOnly.periodo.ate.split('-').reverse().join('/')}. Usado somente para analisar esta semana.
+          </section>
+        )}
+
+        {estoqueOficial && (
+          <section data-testid="estoque-oficial-lideres" className="rounded-2xl border border-brand-100 bg-brand-50/70 px-4 py-3 text-sm text-brand-900 dark:border-brand-900 dark:bg-brand-950/20 dark:text-brand-100">
+            <strong>Estoque oficial carregado:</strong> {estoqueOficial.itens.length} item(ns) unívoco(s) · {estoqueOficial.ambiguos.length} ambíguo(s) · {estoqueOficial.semContagem.length} sem contagem. Somente contagens recentes entram no bônus leve do planejamento; itens ambíguos ficam fora.
           </section>
         )}
 
@@ -271,11 +352,17 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
               aceitacao={aceitacao}
               frequencia={frequenciaRecente}
               estoque={estoqueQuantidade}
+              restricoesEquipe={restricoesEquipe}
+              desperdicioHistorico={desperdicioHistorico}
+              historicoPrecos={historico}
+              baselineAutomatico={baselineAutomatico}
+              eventos={eventos}
+              datasSemana={datasSemana}
             />
 
             <section className="rounded-3xl border border-carvao-100 bg-white p-3 shadow-sm dark:border-carvao-800 dark:bg-carvao-900 md:p-5">
               <div className="mb-4 rounded-2xl bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:bg-brand-900/20 dark:text-brand-200">
-                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Nesta superfície os ajustes ficam no rascunho isolado até o envio da proposta.
+                <strong>Ajuste fino:</strong> depois de comparar os cenários, altere qualquer dia manualmente. Os geradores antigos continuam disponíveis como ferramenta secundária, mas não substituem a comparação acima.
               </div>
               <AbaCardapio
                 estado={estado}
@@ -284,6 +371,10 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
                 fatores={fatores}
                 podeEditar={true}
                 precos={precos}
+                definirPreco={definirPreco}
+                definirFornecedor={definirFornecedor}
+                cadastrarItem={cadastrarItem}
+                registrarOferta={registrarOferta}
                 fornecedores={fornecedores}
                 itensExtras={itensExtras}
               />

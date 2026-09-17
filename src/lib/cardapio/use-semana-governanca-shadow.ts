@@ -6,12 +6,9 @@ import { clonarSemanaParaRascunho } from './governanca-shadow';
 import type { EstadoSemana } from './tipos';
 
 /**
- * Wrapper de coexistência para a migração House → Líderes.
- *
- * Lê a semana operacional real apenas como ponto de partida e, depois do boot,
- * destaca uma cópia em memória. O `atualizar` retornado NUNCA chama o updater
- * persistente de `useSemana`, portanto não grava `cardapio.v1.semana.*`, não
- * aciona o espelhamento do BootNuvem e não altera o House que segue em uso.
+ * Wrapper de coexistência House → Líderes.
+ * Lê a semana operacional somente como ponto de partida e destaca uma cópia em memória.
+ * O atualizar retornado nunca chama o updater persistente de useSemana.
  */
 export function useSemanaGovernancaShadow(semanaId: string) {
   const { estado: operacional, pronto: operacionalPronto } = useSemana(semanaId);

@@ -12,6 +12,12 @@
    sincronização ignora. Assim o histórico nunca entra em merge, nunca
    infla a nuvem e nunca vira mais uma coisa capaz de sobrescrever a
    semana de todo mundo. Restaurar, sim, publica normalmente.
+
+   IMPORTANTE: anexos binários/base64 de NF não pertencem ao "desfazer" do
+   cardápio. Copiá-los em cada snapshot multiplicava centenas de KB/MB e podia
+   esgotar o localStorage mesmo com poucos documentos operacionais. O histórico
+   guarda a semana sem `notas`/`notasFiscais`; ao restaurar, a UI preserva os
+   anexos atuais da semana.
    ===================================================================== */
 
 import type { EstadoSemana } from './tipos';
@@ -33,11 +39,39 @@ function chaveHist(semanaId: string): string {
   return `${PREFIXO}__hist.${semanaId}`;
 }
 
+/**
+ * Snapshot leve para desfazer cardápio. Mantém os campos operacionais, mas
+ * exclui imagens de nota fiscal (base64), que já pertencem ao documento atual
+ * e à nuvem. A função não altera o objeto recebido.
+ */
+export function estadoParaHistorico(estado: EstadoSemana): EstadoSemana {
+  const clone = JSON.parse(JSON.stringify(estado)) as EstadoSemana;
+  delete clone.notas;
+  delete clone.notasFiscais;
+  return clone;
+}
+
+function normalizarVersoes(versoes: VersaoSemana[]): VersaoSemana[] {
+  return versoes.map((v) => ({ ...v, estado: estadoParaHistorico(v.estado) }));
+}
+
 export function lerVersoes(semanaId: string): VersaoSemana[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(chaveHist(semanaId));
-    return raw ? (JSON.parse(raw) as VersaoSemana[]) : [];
+    const chave = chaveHist(semanaId);
+    const raw = localStorage.getItem(chave);
+    if (!raw) return [];
+    const lidas = JSON.parse(raw) as VersaoSemana[];
+    const normalizadas = normalizarVersoes(lidas);
+    const compacto = JSON.stringify(normalizadas);
+
+    // Migração oportunista: históricos antigos podem conter cópias enormes de
+    // fotos. Substituí-los pela forma leve libera espaço sem tocar o cardápio
+    // operacional, a nuvem, preços, fornecedores ou estoque.
+    if (compacto !== raw) {
+      try { localStorage.setItem(chave, compacto); } catch { /* best-effort */ }
+    }
+    return normalizadas;
   } catch {
     return [];
   }
@@ -57,17 +91,21 @@ export function registrarVersao(
   anterior: EstadoSemana | null | undefined,
   origem: VersaoSemana['origem'],
 ): void {
-  if (typeof window === 'undefined' || !temConteudo(anterior)) return;
+  if (typeof window === 'undefined') return;
+  if (!anterior) return;
+  if (!temConteudo(anterior)) return;
+
   try {
     const versoes = lerVersoes(semanaId);
-    const serializado = JSON.stringify(anterior);
+    const leve = estadoParaHistorico(anterior);
+    const serializado = JSON.stringify(leve);
     // Um "marco" é um ponto de retorno pedido pela pessoa: registra mesmo
     // que nada tenha mudado desde a última foto.
     if (origem !== 'marco' && versoes[0] && JSON.stringify(versoes[0].estado) === serializado) return;
     const nova: VersaoSemana = {
       em: new Date().toISOString(),
       origem,
-      estado: JSON.parse(serializado) as EstadoSemana,
+      estado: leve,
     };
     const lista = [nova, ...versoes].slice(0, MAX_VERSOES);
     // Gravação crua: `__` nunca vai para a nuvem, e usar o setItem original
