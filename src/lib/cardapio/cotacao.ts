@@ -183,34 +183,128 @@ const ALIASES: [RegExp, string][] = [
   [/^ovos?( de galinha| vermelhos| extra)?$/, 'Ovos'],
 ];
 
-/** Casa um nome de cotação com um item do histórico (ou null). */
-export function casarItem(nome: string): string | null {
-  const n = tokens(nome).join(' ');
-  if (!n) return null;
+export interface SugestaoItemCotacao {
+  item: string | null;
+  unid: string | null;
+  confianca: number;
+  motivo: 'alias' | 'exato' | 'tokens' | 'ambiguo' | 'sem-match';
+}
+
+function tokenComparavel(token: string): string {
+  const mapa: Record<string, string> = {
+    und: 'un', unid: 'un', unidade: 'un', unidades: 'un',
+    kgs: 'kg', quilo: 'kg', quilos: 'kg',
+    pacotes: 'pacote', caixas: 'caixa', bandejas: 'bandeja',
+  };
+  let t = mapa[token] ?? token;
+  // Singularização conservadora cobre a maior parte dos nomes de fornecedor
+  // (tomates, cenouras, abacaxis, frangos) sem tentar adivinhar morfologia inteira.
+  if (t.length > 4 && t.endsWith('s') && !t.endsWith('ss')) t = t.slice(0, -1);
+  return t;
+}
+
+function tokensComparaveis(nome: string): string[] {
+  return Array.from(new Set(tokens(nome).map(tokenComparavel).filter(Boolean)));
+}
+
+function candidatosCatalogo(itensExtras?: Record<string, { n: string; u: string }>) {
+  const mapa = new Map<string, { n: string; u: string; f: number }>();
+  for (const it of DADOS.itens) mapa.set(normalizar(it.n), { n: it.n, u: it.u, f: it.f });
+  for (const extra of Object.values(itensExtras ?? {})) {
+    const k = normalizar(extra.n);
+    if (k && !mapa.has(k)) mapa.set(k, { n: extra.n, u: extra.u, f: 0 });
+  }
+  return Array.from(mapa.values());
+}
+
+/**
+ * Resolve nomes de fornecedor contra o catálogo sem pedir trabalho humano item a item.
+ * Só aceita automaticamente quando o melhor candidato é forte E claramente melhor
+ * que o segundo colocado; ambiguidade continua explícita em vez de contaminar preços.
+ */
+export function sugerirItemCotacao(
+  nome: string,
+  itensExtras?: Record<string, { n: string; u: string }>,
+): SugestaoItemCotacao {
+  const tokensNome = tokensComparaveis(nome);
+  const n = tokensNome.join(' ');
+  if (!n) return { item: null, unid: null, confianca: 0, motivo: 'sem-match' };
+
+  // Item extra já aprendido pela operação tem prioridade quando o nome canônico
+  // está integralmente contido no texto do fornecedor e o match é único.
+  // Aqui NÃO usamos RUIDO: termos como "especial" podem ser justamente parte do
+  // nome ensinado pela operação ("Molho especial"). Ainda exigimos >=2 tokens
+  // para não transformar uma palavra genérica isolada em casamento automático.
+  const tokensAprendidos = (valor: string) =>
+    normalizar(valor).split(/[^a-z0-9]+/).filter((t) => t.length > 1 && !/^\d/.test(t));
+  const setNomeAprendido = new Set(tokensAprendidos(nome));
+  const extrasCompativeis = Object.values(itensExtras ?? {}).filter((extra) => {
+    const et = tokensAprendidos(extra.n);
+    return et.length >= 2 && et.every((t) => setNomeAprendido.has(t));
+  });
+  if (extrasCompativeis.length === 1) {
+    const extra = extrasCompativeis[0];
+    return { item: extra.n, unid: extra.u || null, confianca: 0.97, motivo: 'tokens' };
+  }
 
   for (const [re, alvo] of ALIASES) {
-    if (re.test(n)) return alvo;
+    if (!re.test(n)) continue;
+    const alvoDados = candidatosCatalogo(itensExtras).find((it) => normalizar(it.n) === normalizar(alvo));
+    return { item: alvo, unid: alvoDados?.u ?? null, confianca: 1, motivo: 'alias' };
   }
 
-  // pontuação por cobertura de tokens do item dentro do nome cotado
-  const nomeTokens = new Set(tokens(nome));
-  let melhor: string | null = null;
-  let melhorNota = 0;
-  for (const it of DADOS.itens) {
-    const itTokens = tokens(it.n);
-    if (itTokens.length === 0) continue;
-    const cobertos = itTokens.filter((t) => nomeTokens.has(t)).length;
-    if (cobertos === 0) continue;
-    // todos os tokens do item precisam aparecer no nome cotado
-    if (cobertos < itTokens.length) continue;
-    // nota: itens mais específicos (mais tokens) e mais frequentes vencem
-    const nota = itTokens.length * 1000 + Math.min(it.f, 999);
-    if (nota > melhorNota) {
-      melhorNota = nota;
-      melhor = it.n;
+  const consultaNorm = normalizar(nome);
+  const consultaTokens = new Set(tokensComparaveis(nome));
+  const avaliados = candidatosCatalogo(itensExtras).map((it) => {
+    const candidatoNorm = normalizar(it.n);
+    if (candidatoNorm === consultaNorm) return { ...it, score: 1 };
+
+    const candTokens = new Set(tokensComparaveis(it.n));
+    if (candTokens.size === 0 || consultaTokens.size === 0) return { ...it, score: 0 };
+    let inter = 0;
+    candTokens.forEach((t) => { if (consultaTokens.has(t)) inter += 1; });
+    if (inter === 0) return { ...it, score: 0 };
+
+    const dice = (2 * inter) / (candTokens.size + consultaTokens.size);
+    const coberturaCandidato = inter / candTokens.size;
+    const coberturaConsulta = inter / consultaTokens.size;
+    let score = dice;
+
+    // Nome do fornecedor contém todo o nome canônico + qualificadores/embalagem.
+    if (candTokens.size >= 2 && coberturaCandidato === 1) {
+      score = Math.max(score, 0.94 - Math.min(0.08, Math.max(0, consultaTokens.size - candTokens.size) * 0.02));
     }
+    // Fornecedor usa uma forma mais curta, mas todos os seus tokens apontam ao candidato.
+    if (consultaTokens.size >= 2 && coberturaConsulta === 1) score = Math.max(score, 0.88);
+    // Plural/singular de item de uma palavra é seguro após normalização conservadora.
+    if (consultaTokens.size === 1 && candTokens.size === 1 && inter === 1) score = 0.98;
+
+    // Frequência histórica só desempata; não transforma semelhança ruim em match.
+    score += Math.min(it.f, 100) / 100000;
+    return { ...it, score: Math.min(score, 1) };
+  }).sort((a, b) => b.score - a.score || a.n.localeCompare(b.n, 'pt-BR'));
+
+  const melhor = avaliados[0];
+  const segundo = avaliados[1];
+  if (!melhor || melhor.score < 0.82) {
+    return { item: null, unid: null, confianca: melhor?.score ?? 0, motivo: 'sem-match' };
   }
-  return melhor;
+  const margem = melhor.score - (segundo?.score ?? 0);
+  const seguro = (melhor.score >= 0.94 && margem >= 0.04) || (melhor.score >= 0.86 && margem >= 0.08);
+  if (!seguro) {
+    return { item: null, unid: null, confianca: melhor.score, motivo: 'ambiguo' };
+  }
+  return {
+    item: melhor.n,
+    unid: melhor.u || null,
+    confianca: melhor.score,
+    motivo: melhor.score >= 0.98 ? 'exato' : 'tokens',
+  };
+}
+
+/** Casa um nome de cotação com um item conhecido (ou null). */
+export function casarItem(nome: string): string | null {
+  return sugerirItemCotacao(nome).item;
 }
 
 /* --------------------------- parser de texto -------------------------- */
@@ -678,9 +772,13 @@ export function agruparCotacao(
   const soltos: LinhaCotacao[] = [];
 
   for (const bruta of linhas) {
-    // itens cadastrados pelo usuário em cotações anteriores são conhecidos
+    // 1) alias já aprendido/exato; 2) matcher automático conservador contra
+    // catálogo base + itens extras. Match novo é revalidado antes de aplicar preço.
     const extra = !bruta.item ? itensExtras?.[normalizar(bruta.nome)] : undefined;
-    const l = extra ? { ...bruta, item: extra.n } : bruta;
+    const sugestao = !bruta.item && !extra ? sugerirItemCotacao(bruta.nome, itensExtras) : null;
+    const itemAuto = extra?.n ?? sugestao?.item ?? null;
+    const unidadeAuto = extra?.u ?? sugestao?.unid ?? null;
+    const l = itemAuto ? validarLinha({ ...bruta, item: itemAuto }) : bruta;
     if (!l.item) {
       soltos.push(l);
       continue;
@@ -689,7 +787,7 @@ export function agruparCotacao(
     if (!atual) {
       porItem.set(l.item, {
         item: l.item,
-        unid: unidadeDoItem.get(l.item) ?? extra?.u ?? l.unid ?? '',
+        unid: unidadeDoItem.get(l.item) ?? unidadeAuto ?? l.unid ?? '',
         preco: l.preco,
         marca: l.marca,
         ofertas: 1,

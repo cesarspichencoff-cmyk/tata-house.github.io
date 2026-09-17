@@ -9,9 +9,9 @@ import {
   converterParaUnidadeBase,
   formatarQtd,
   formatarReais,
-  linhasDoDia,
   normalizar,
 } from '@/lib/cardapio/motor';
+import { linhasDoDiaComAprendizado } from '@/lib/cardapio/aprendizado-compras';
 import { resolverPreco } from '@/lib/cardapio/precos';
 import { custoDoDia } from '@/lib/cardapio/custo-semana';
 import { registrarAuditoria, useMostrarBasicos } from '@/lib/cardapio/estado';
@@ -233,7 +233,7 @@ export function AbaCompras({
   const missao = useMemo(() => {
     let total = 0, comprado = 0, recebido = 0, estimado = 0;
     DIAS_SEMANA.forEach((_, dia) => {
-      linhasDoDia(estado, dia, fatores, { mostrarBasicos }).forEach((l) => {
+      linhasDoDiaComAprendizado(estado, dia, fatores, { mostrarBasicos }).forEach((l) => {
         total++;
         if (l.status.compradoEm) comprado++;
         if (l.status.recebidoOk) recebido++;
@@ -248,7 +248,7 @@ export function AbaCompras({
   const comprarTudo = (dia: number) =>
     atualizar((e) => {
       const st = { ...(e.status[dia] ?? {}) };
-      linhasDoDia(e, dia, fatores, { mostrarBasicos }).forEach((l) => {
+      linhasDoDiaComAprendizado(e, dia, fatores, { mostrarBasicos }).forEach((l) => {
         if (!st[l.chave]?.compradoEm) st[l.chave] = { ...(st[l.chave] ?? {}), compradoEm: hojeIso(), compradoQtd: l.qtd };
       });
       return { ...e, status: { ...e.status, [dia]: st } };
@@ -257,7 +257,7 @@ export function AbaCompras({
   const receberTudo = (dia: number) =>
     atualizar((e) => {
       const st = { ...(e.status[dia] ?? {}) };
-      linhasDoDia(e, dia, fatores, { mostrarBasicos }).forEach((l) => {
+      linhasDoDiaComAprendizado(e, dia, fatores, { mostrarBasicos }).forEach((l) => {
         const s = st[l.chave];
         if (s?.compradoEm && !s.recebidoOk)
           st[l.chave] = { ...s, recebidoOk: true, recebidoQtd: s.compradoQtd ?? l.qtd };
@@ -613,7 +613,7 @@ export function AbaCompras({
                         atualizar((e) => {
                           const status = { ...e.status };
                           dias.forEach((di) => {
-                            const linhas = linhasDoDia(e, di, fatores, { mostrarBasicos });
+                            const linhas = linhasDoDiaComAprendizado(e, di, fatores, { mostrarBasicos });
                             const novoStatus = { ...(status[di] ?? {}) };
                             itensValidos.forEach((it) => {
                               const itemNorm = normalizar(it.produto);
@@ -676,14 +676,14 @@ export function AbaCompras({
 
       {modo === 'detalhado' &&
         estado.dias.map((dia, di) => {
-        const linhas = linhasDoDia(estado, di, fatores, { mostrarBasicos });
+        const linhas = linhasDoDiaComAprendizado(estado, di, fatores, { mostrarBasicos });
         if (!dia.principal && linhas.length === 0) return null;
         // FONTE ÚNICA (custo-semana.ts). Antes usava custoDaLista, que só
         // olhava o mapa de preços cru: item sem preço direto entrava como
         // ZERO, sem estimativa nem fallback de ingrediente base — e ainda
         // montava a lista ignorando "mostrar básicos". Resultado: número
         // diferente do da tela do cardápio, e subestimado.
-        const custo = custoDoDia(estado, di, precos, estimativas, { fatores, mostrarBasicos });
+        const custo = custoDoDia(estado, di, precos, estimativas, { fatores, mostrarBasicos, usarAprendizadoComposicao: true });
         const compradas = linhas.filter((l) => l.status.compradoEm).length;
         const recebidas = linhas.filter((l) => l.status.recebidoOk).length;
         const divergencias = linhas.filter(

@@ -267,11 +267,14 @@ function contagemInicial(): Record<Proteina, number> {
   return { bovina: 0, frango: 0, suina: 0, peixe: 0, ovo: 0, outros: 0 };
 }
 
-function viavelAposAdicionar(cont: Record<Proteina, number>, faltam: number): boolean {
-  if (cont.frango > 4 || cont.bovina > 3 || cont.suina > 2) return false;
-  const precisaFrango = Math.max(0, 3 - cont.frango);
-  const precisaBovina = Math.max(0, 2 - cont.bovina);
-  return precisaFrango + precisaBovina <= faltam;
+function viavelAposAdicionar(cont: Record<Proteina, number>): boolean {
+  // Nenhuma proteína deve dominar a semana. Três é apenas teto de fallback;
+  // a seleção final tenta primeiro no máximo duas ocorrências por proteína.
+  return cont.frango <= 3
+    && cont.bovina <= 3
+    && cont.suina <= 3
+    && cont.peixe <= 3
+    && cont.ovo <= 3;
 }
 
 function buscarPrincipais(
@@ -306,18 +309,19 @@ function buscarPrincipais(
         if (estado.familias.has(sinal.familia) && sinal.familia) continue;
 
         const contagem = { ...estado.contagem, [sinal.proteina]: estado.contagem[sinal.proteina] + 1 };
-        const faltam = 6 - dia;
-        if (!viavelAposAdicionar(contagem, faltam)) continue;
+        if (!viavelAposAdicionar(contagem)) continue;
 
         const tecnicas = new Map(estado.tecnicas);
         const tecnicaQtd = (tecnicas.get(sinal.tecnica) ?? 0) + 1;
         tecnicas.set(sinal.tecnica, tecnicaQtd);
         const diversidade = !estado.tecnicas.has(sinal.tecnica) ? 5 : tecnicaQtd > 2 ? -10 : -2;
-        const bonusProteinaNova = estado.contagem[sinal.proteina] === 0 ? 3 : 0;
+        const repeticoesProteina = estado.contagem[sinal.proteina];
+        const bonusProteinaNova = repeticoesProteina === 0 ? 9 : 0;
+        const penalidadeProteina = sinal.proteina === 'outros' ? 0 : repeticoesProteina * 9;
 
         proximos.push({
           pratos: [...estado.pratos, sinal.nome],
-          score: estado.score + scorePrato(sinal, modo, pessoas[dia], mediaPessoas, diasBase[dia]?.principal ?? '') + diversidade + bonusProteinaNova,
+          score: estado.score + scorePrato(sinal, modo, pessoas[dia], mediaPessoas, diasBase[dia]?.principal ?? '') + diversidade + bonusProteinaNova - penalidadeProteina,
           contagem,
           familias: new Set(Array.from(estado.familias).concat(sinal.familia)),
           tecnicas,
@@ -331,8 +335,17 @@ function buscarPrincipais(
     if (feixe.length === 0) return null;
   }
 
-  const final = feixe.find((e) => e.contagem.frango >= 3 && e.contagem.frango <= 4 && e.contagem.bovina >= 2 && e.contagem.bovina <= 3 && e.contagem.suina <= 2);
-  return final?.pratos ?? null;
+  const categorias = (e: EstadoBusca) => Object.values(e.contagem).filter((n) => n > 0).length;
+  const ideal = feixe.find((e) =>
+    categorias(e) >= 4
+    && e.contagem.frango <= 2
+    && e.contagem.bovina <= 2
+    && e.contagem.suina <= 2
+    && e.contagem.peixe <= 2
+    && e.contagem.ovo <= 2,
+  );
+  const fallback = feixe.find((e) => categorias(e) >= 3 && Math.max(...Object.values(e.contagem)) <= 3);
+  return ideal?.pratos ?? fallback?.pratos ?? feixe[0]?.pratos ?? null;
 }
 
 function custoComponente(

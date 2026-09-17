@@ -1072,7 +1072,9 @@ export default function PaginaCardapios() {
                   <AbaRadar precos={precos} historico={historico} fornecedores={fornecedores} />
                 )}
 
-                {abaRelatorios === 'gastos' && <AbaGastos />}
+                {abaRelatorios === 'gastos' && (
+                  <AbaGastos estado={estado} semanaId={semanaId} precos={precos} fatores={fatores} />
+                )}
 
                 {abaRelatorios === 'auditoria' && pode(papel, 'auditoria:ver') && (
                   <AbaAuditoria papel={papel} />

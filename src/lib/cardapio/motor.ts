@@ -86,11 +86,13 @@ export function validarSemana(dias: DiaCardapio[], precos?: Record<string, numbe
   });
 
   if (suina > 2) avisos.push({ nivel: 'erro', msg: `Carne suína ${suina}× — a regra é no máximo 2× na semana.` });
-  if (frango > 4) avisos.push({ nivel: 'erro', msg: `Frango ${frango}× — a regra é de 3 a 4× na semana.` });
+  if (frango > 4) avisos.push({ nivel: 'erro', msg: `Frango ${frango}× — máximo 4× na semana.` });
   if (bovina > 3) avisos.push({ nivel: 'erro', msg: `Carne bovina ${bovina}× — máximo 3× na semana.` });
   if (preenchidos === 7) {
-    if (frango < 3) avisos.push({ nivel: 'alerta', msg: `Frango só ${frango}× — o ideal é de 3 a 4× na semana.` });
-    if (bovina < 2) avisos.push({ nivel: 'alerta', msg: `Bovina só ${bovina}× — o ideal é de 2 a 3× na semana.` });
+    const familiasProteina = Object.values(cont).filter((qtd) => qtd > 0).length;
+    if (familiasProteina < 3) {
+      avisos.push({ nivel: 'alerta', msg: 'Semana com pouca variedade de proteínas — tente distribuir melhor as famílias.' });
+    }
   }
 
   for (let i = 1; i < 7; i++) {
