@@ -3,9 +3,10 @@
 /* =====================================================================
    Central Gerencial — leitura viva + exportação.
 
-   O estado atual da semana entra diretamente nos cálculos (não por releitura
-   congelada do localStorage), e o painel cruza compras, NFs, demanda, estoque,
-   desperdício, aceitação, preço e ofertas com classes explícitas de evidência.
+   O estado atual da semana entra diretamente nos cálculos e o painel cruza
+   compras, NFs, demanda, estoque, desperdício, aceitação, preço e ofertas.
+   Fontes operacionais vivas são lidas por hooks internos para manter a
+   interface existente do componente e atualizar sem reload.
    ===================================================================== */
 
 import { useMemo, useState } from 'react';
@@ -21,27 +22,23 @@ import {
 import { resolverPreco } from '@/lib/cardapio/precos';
 import {
   useAuditoria,
+  useDesperdicio,
+  useContagemRefeicoes,
+  useEstoque,
+  useOfertas,
   semanasComConteudo,
   lerSemana,
   datasDaSemana,
   periodoSemana,
-  type Ofertas,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
 import { useGastos } from '@/lib/cardapio/gastos';
 import { construirInteligenciaViva } from '@/lib/cardapio/inteligencia-viva';
 import { indiceNutricionalSemana } from '@/lib/cardapio/nutricao-prato';
-import type {
-  EstadoSemana,
-  HistoricoPrecos,
-  Aceitacao,
-  RegistroDesperdicio,
-  ContagemRefeicoesDia,
-  Estoque,
-} from '@/lib/cardapio/tipos';
+import type { EstadoSemana, HistoricoPrecos, Aceitacao } from '@/lib/cardapio/tipos';
 
 function baixarCsv(nome: string, linhas: string[][]) {
-  const bom = '﻿'; // BOM para Excel reconhecer UTF-8
+  const bom = '﻿';
   const conteudo = bom + linhas.map((l) => l.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   const blob = new Blob([conteudo], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -60,10 +57,6 @@ export function CentralGerencial({
   aceitacao,
   fornecedores,
   fatores,
-  desperdicio,
-  contagens,
-  estoque,
-  ofertas,
 }: {
   estado: EstadoSemana;
   semanaId: string;
@@ -72,14 +65,14 @@ export function CentralGerencial({
   aceitacao: Aceitacao;
   fornecedores: Record<string, string>;
   fatores?: Record<string, number>;
-  desperdicio: RegistroDesperdicio[];
-  contagens: ContagemRefeicoesDia[];
-  estoque: Estoque;
-  ofertas: Ofertas;
 }) {
   const { registros: auditoria } = useAuditoria();
   const { estimativas } = useEstimativas();
   const { lancamentos } = useGastos();
+  const { registros: desperdicio } = useDesperdicio(semanaId);
+  const { contagens } = useContagemRefeicoes();
+  const { estoque } = useEstoque();
+  const { ofertas } = useOfertas();
   const [periodo, setPeriodo] = useState<'semana' | 'mes' | 'tudo'>('semana');
 
   const datasSemana = useMemo(
@@ -119,7 +112,6 @@ export function CentralGerencial({
     lancamentos,
   ]);
 
-  /* Semanas do período selecionado */
   const semanaIds = useMemo(() => {
     const todas = semanasComConteudo();
     if (periodo === 'semana') return [semanaId];
@@ -127,12 +119,8 @@ export function CentralGerencial({
     return todas;
   }, [periodo, semanaId, estado]);
 
-  // A semana aberta usa o estado React atual. Isso remove o atraso visual que
-  // ocorria quando o relatório dependia apenas de `lerSemana()` dentro de um
-  // memo que não tinha `estado` como dependência.
   const estadoDoPeriodo = (sid: string): EstadoSemana => sid === semanaId ? estado : lerSemana(sid);
 
-  /* KPIs agregados */
   const kpis = useMemo(() => {
     let custoTotal = 0;
     let itensComprados = 0;
@@ -162,10 +150,7 @@ export function CentralGerencial({
     return { custoTotal, itensComprados, itensRecebidos, totalRefeicoes, semanas: semanaIds.length };
   }, [semanaIds, semanaId, estado, precos, estimativas, fatores]);
 
-  /* Índice nutricional da semana atual */
   const nutri = useMemo(() => indiceNutricionalSemana(estado.dias), [estado.dias]);
-
-  /* ---- Funções de exportação ---- */
 
   const exportarCompras = () => {
     const rows: string[][] = [['Semana', 'Dia', 'Item', 'Qtd Sugerida', 'Unid', 'Qtd Comprada', 'Preço Pago', 'Qtd Recebida', 'OK', 'Observação']];
@@ -298,8 +283,6 @@ export function CentralGerencial({
     <div className="space-y-6">
       <PainelInteligenciaViva inteligencia={inteligencia} />
 
-      {/* Histórico/exportação fica abaixo da leitura viva: relatório deixa de
-          ser apenas depósito de registros, sem perder rastreabilidade. */}
       <div className="space-y-1">
         <p className="text-micro font-bold uppercase tracking-[0.18em] text-texto-suave">Histórico e exportação</p>
         <p className="text-lg font-extrabold text-carvao-900 dark:text-white">
