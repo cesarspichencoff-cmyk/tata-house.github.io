@@ -6,6 +6,7 @@ on:
       - feat/tata-house-final-reconciled-20260917
     paths:
       - scripts/reconcile_shadow_final.py
+      - .github/workflows/final-reconcile-shadow.yml
 
 permissions:
   contents: write
