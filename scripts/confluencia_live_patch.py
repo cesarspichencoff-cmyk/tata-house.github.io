@@ -98,11 +98,16 @@ export function sugerirItemCotacao(
   if (!n) return { item: null, unid: null, confianca: 0, motivo: 'sem-match' };
 
   // Item extra já aprendido pela operação tem prioridade quando o nome canônico
-  // (>=2 tokens) está integralmente contido no texto do fornecedor e o match é único.
-  const setNome = new Set(tokensNome);
+  // está integralmente contido no texto do fornecedor e o match é único.
+  // Aqui NÃO usamos RUIDO: termos como "especial" podem ser justamente parte do
+  // nome ensinado pela operação ("Molho especial"). Ainda exigimos >=2 tokens
+  // para não transformar uma palavra genérica isolada em casamento automático.
+  const tokensAprendidos = (valor: string) =>
+    normalizar(valor).split(/[^a-z0-9]+/).filter((t) => t.length > 1 && !/^\\d/.test(t));
+  const setNomeAprendido = new Set(tokensAprendidos(nome));
   const extrasCompativeis = Object.values(itensExtras ?? {}).filter((extra) => {
-    const et = tokensComparaveis(extra.n);
-    return et.length >= 2 && et.every((t) => setNome.has(t));
+    const et = tokensAprendidos(extra.n);
+    return et.length >= 2 && et.every((t) => setNomeAprendido.has(t));
   });
   if (extrasCompativeis.length === 1) {
     const extra = extrasCompativeis[0];
