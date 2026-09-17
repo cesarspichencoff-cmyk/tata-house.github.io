@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/confluencia-live-verify.yml
       - scripts/confluencia_live_patch.py
+      - scripts/confluencia_compras_patch.py
 
 permissions:
   contents: write
@@ -21,7 +22,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply bounded Confluencia patch
-        run: python scripts/confluencia_live_patch.py
+        run: |
+          python scripts/confluencia_live_patch.py
+          python scripts/confluencia_compras_patch.py
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -44,10 +47,18 @@ jobs:
             src/lib/cardapio/refeicoes.ts \
             src/components/cardapio/LinhaTempoCasa.tsx \
             src/components/cardapio/AbaGastos.tsx \
+            src/lib/cardapio/tipos.ts \
+            src/lib/cardapio/aprendizado-compras.ts \
+            src/lib/cardapio/aprendizado-compras.test.ts \
+            src/lib/cardapio/motor.ts \
+            src/components/cardapio/ListaCompras.tsx \
+            src/components/cardapio/AbaCompras.tsx \
+            src/lib/cardapio/custo-semana.ts \
+            src/components/cardapio/PlanejadoVsReal.tsx \
             src/app/page.tsx
           if git diff --cached --quiet; then
             echo "No source changes"
           else
-            git commit -m "feat(confluencia): tornar dados vivos e cotacao autoassimilavel"
+            git commit -m "feat(confluencia): aprender composição real das compras e tornar dados vivos"
             git push
           fi
