@@ -20,9 +20,9 @@ import {
   useItensExtras,
   useOfertas,
   usePrecos,
-  useSemana,
 } from '@/lib/cardapio/estado';
 import { useEstimativas } from '@/lib/cardapio/estimativas';
+import { useSemanaGovernancaShadow } from '@/lib/cardapio/use-semana-governanca-shadow';
 import { listaDoDia, normalizar } from '@/lib/cardapio/motor';
 import {
   avaliarProntidaoPlanejamento,
@@ -149,7 +149,7 @@ function PlanejadorAutorizado({ contexto }: { contexto: PlanejadorContextoGovern
   const [estoqueOficial, setEstoqueOficial] = useState<SnapshotEstoqueGovernancaV1 | null>(null);
   const proposalIdPendente = useRef<string | null>(null);
 
-  const { estado, atualizar, pronto } = useSemana(contexto.semanaId);
+  const { estado, atualizar, pronto } = useSemanaGovernancaShadow(contexto.semanaId);
   const { precos, definirPreco } = usePrecos();
   const { fornecedores, definirFornecedor } = useFornecedores();
   const { registrarOferta } = useOfertas();
