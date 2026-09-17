@@ -23,6 +23,19 @@ jobs:
           cache: npm
       - name: Apply finance truth patch
         run: python scripts/house10_finance_patch.py
+      - name: Fix finance TypeScript narrowing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/cardapio/inteligencia-viva.ts')
+          s = p.read_text()
+          s = s.replace(
+              "const erroDemandaPct = erroDemanda == null || !(previstasComparaveis > 0)",
+              "const erroDemandaPct = erroDemanda == null || previstasComparaveis == null || previstasComparaveis <= 0",
+              1,
+          )
+          p.write_text(s)
+          PY
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
