@@ -10,6 +10,7 @@ import { Icone } from '@/components/Icones';
 import { BottomSheet, Skeleton, Kpi } from '@/components/ui';
 import { resumoSemana } from '@/lib/cardapio/indicadores';
 import { formatarReais } from '@/lib/cardapio/motor';
+import { taxaMediaDesperdicio } from '@/lib/cardapio/desperdicio-metricas';
 
 /* Tela de Início (visão padrão pós-login) — eager para não piscar no
    primeiro paint. */
@@ -588,9 +589,10 @@ export default function PaginaCardapios() {
     let somaNotas = 0, nNotas = 0;
     Object.values(aceitacao).forEach((a) => { if (a.n > 0) { somaNotas += a.somaNotas; nNotas += a.n; } });
     const mediaAceit = nNotas > 0 ? somaNotas / nNotas : null;
-    let prod = 0, sobra = 0;
-    desperdicio.forEach((d) => { if (d.produzido > 0) { prod += d.produzido; sobra += Math.max(0, d.produzido - d.consumido); } });
-    const desperdicioPct = prod > 0 ? (sobra / prod) * 100 : null;
+    // Taxa média por lançamento: percentual é adimensional, então pode
+    // atravessar kg/porções sem jamais somar quantidades físicas incompatíveis.
+    const taxaDesperdicio = taxaMediaDesperdicio(desperdicio);
+    const desperdicioPct = taxaDesperdicio == null ? null : taxaDesperdicio * 100;
     return { custoSemana, custoRef, mediaAceit, desperdicioPct };
   }, [estado, precos, fatores, estimativas, aceitacao, desperdicio]);
 
