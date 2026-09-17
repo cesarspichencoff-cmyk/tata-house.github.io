@@ -37,6 +37,7 @@ import { ehChaveConcorrente, mesclarDocumentoConcorrenteSeguro, selecionarBaseCo
 import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
+import { estadoSemAnexosSemana, hidratarAnexosSemana, persistirAnexosSemana } from '@/lib/cardapio/anexos-semana';
 import {
   precisaReparo,
   aplicarReparo,
@@ -348,8 +349,16 @@ export function BootNuvem() {
         // ainda é disparado. Depois repropagamos o erro para o chamador poder
         // exibir o banner/recuperar cache sem fingir que a gravação local venceu.
         let erroLocal: unknown = null;
+        let valorCache = valor;
+        if (ehTata && k.startsWith('semana.')) {
+          try {
+            const semanaCompleta = JSON.parse(valor) as EstadoSemana;
+            void persistirAnexosSemana(k, semanaCompleta);
+            valorCache = JSON.stringify(estadoSemAnexosSemana(semanaCompleta));
+          } catch { /* payload não-JSON segue normal */ }
+        }
         try {
-          orig(chave, valor);
+          orig(chave, valorCache);
         } catch (e) {
           erroLocal = e;
         }
@@ -391,16 +400,25 @@ export function BootNuvem() {
       }
     };
     const gravarBase = (chave: string, valor: unknown) => {
-      try { orig(PREFIXO + '__base.' + chave, JSON.stringify(valor)); } catch { /* cheio */ }
+      try {
+        const valorCache = chave.startsWith('semana.') && valor && typeof valor === 'object'
+          ? estadoSemAnexosSemana(valor as EstadoSemana)
+          : valor;
+        orig(PREFIXO + '__base.' + chave, JSON.stringify(valorCache));
+      } catch { /* cheio */ }
     };
 
     // Semana: merge 3-vias (base, local, remote) em vez de sobrescrever.
     const aplicarSemana = (chave: string, remote: EstadoSemana): boolean => {
+      // Arquiva anexos remotos antes de compactar a cópia do navegador.
+      // Uma segunda notificação depois da confirmação do IndexedDB permite aos
+      // hooks reidratar a foto sem obrigar o localStorage a carregá-la.
+      void persistirAnexosSemana(chave, remote).then(() => notificarChaveExterna(chave));
       const localRaw = localStorage.getItem(PREFIXO + chave);
       let local: EstadoSemana | null = null;
       try { local = localRaw ? (JSON.parse(localRaw) as EstadoSemana) : null; } catch { local = null; }
       if (!local) {
-        orig(PREFIXO + chave, JSON.stringify(remote));
+        orig(PREFIXO + chave, JSON.stringify(estadoSemAnexosSemana(remote)));
         gravarBase(chave, remote);
         notificarChaveExterna(chave);
         return true;
@@ -413,7 +431,8 @@ export function BootNuvem() {
       gravarBase(chave, remote); // a base passa a ser o que a nuvem mandou
       const mudouLocal = !ig(merged, local);
       if (mudouLocal) {
-        orig(PREFIXO + chave, JSON.stringify(merged));
+        void persistirAnexosSemana(chave, merged);
+        orig(PREFIXO + chave, JSON.stringify(estadoSemAnexosSemana(merged)));
         notificarChaveExterna(chave);
       }
       // Se o merge difere do que a nuvem tem, devolve o merge para convergir —
@@ -538,7 +557,11 @@ export function BootNuvem() {
             try {
               const aindaAusente = (await armazenamentoSupabase.ler<unknown>(k, null)) === null;
               if (!aindaAusente) continue; // não é lacuna de verdade — não empurra
-              subir(k, JSON.parse(raw));
+              const localJson = JSON.parse(raw);
+              const valorSubir = k.startsWith('semana.')
+                ? await hidratarAnexosSemana(k, localJson as EstadoSemana)
+                : localJson;
+              subir(k, valorSubir);
             } catch { /* não-JSON */ }
           }
           definirStatusNuvem('online');

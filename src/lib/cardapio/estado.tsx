@@ -21,6 +21,7 @@ import {
   snapshotHistoricoPrecos,
 } from './estado-grande';
 import { registrarVersao } from './historico-semana';
+import { estadoSemAnexosSemana, hidratarAnexosSemana, persistirAnexosSemana } from './anexos-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
 import { PRECOS_COMPRAS } from './precos-compras';
 import historicoPlanilhaJson from './historico-planilha.json';
@@ -105,10 +106,19 @@ function agendarNotificacaoLocal(chave: string) {
 
 function gravarLocal(chave: string, valor: unknown) {
   try {
+    let valorCache = valor;
+    // Sem nuvem, o próprio estado mantém os anexos grandes no IndexedDB.
+    // Com nuvem, BootNuvem preserva o payload completo no upload e grava só
+    // a forma compacta no cache local.
+    if (!supabaseHabilitado() && chave.startsWith('semana.') && valor && typeof valor === 'object') {
+      const semana = valor as EstadoSemana;
+      void persistirAnexosSemana(chave, semana);
+      valorCache = estadoSemAnexosSemana(semana);
+    }
     const resultado = gravarComRecuperacaoDeQuota(
       localStorage,
       PREFIXO + chave,
-      JSON.stringify(valor),
+      JSON.stringify(valorCache),
     );
     definirArmazenamentoLocalCheio(!resultado.ok);
     // O evento nativo `storage` não dispara na mesma aba. Agenda a
@@ -301,7 +311,18 @@ export function useSemana(semanaId: string) {
   const [pronto, setPronto] = useState(false);
 
   const recarregar = useCallback(() => {
-    setEstado(lerLocal('semana.' + semanaId, semanaVazia()));
+    const chave = 'semana.' + semanaId;
+    const local = lerLocal(chave, semanaVazia());
+    setEstado(local);
+    // Fotos antigas/legadas ficam fora do localStorage. Reidrata em segundo
+    // plano sem permitir que uma leitura atrasada sobrescreva uma edição que
+    // aconteceu depois do primeiro paint.
+    void hidratarAnexosSemana(chave, local).then((hidratado) => {
+      setEstado((atual) => {
+        const baseAindaIgual = JSON.stringify(estadoSemAnexosSemana(atual)) === JSON.stringify(estadoSemAnexosSemana(local));
+        return baseAindaIgual ? hidratado : atual;
+      });
+    });
   }, [semanaId]);
 
   useEffect(() => {
