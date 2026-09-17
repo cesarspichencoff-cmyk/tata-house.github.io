@@ -42,7 +42,7 @@ export function PlanejadoVsReal({
     // Custo planejado item a item — mesma fonte da lista de compras.
     const porItem = new Map<string, ItemPlanejado>();
     estado.dias.forEach((_, di) => {
-      for (const l of itensDoDiaParaCusto(estado, di, { fatores, mostrarBasicos })) {
+      for (const l of itensDoDiaParaCusto(estado, di, { fatores, mostrarBasicos, usarAprendizadoComposicao: true })) {
         const r = resolverPreco(l.norm, precos, estimativas);
         if (!(r.valor > 0)) continue;
         const custo = r.valor * converterParaUnidadeBase(l.qtd, l.unid);

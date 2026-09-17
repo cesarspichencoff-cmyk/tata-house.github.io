@@ -16,8 +16,33 @@ function getLocal(): Raw {
   try { return JSON.parse(localStorage.getItem(CHAVE) ?? '{}'); } catch { return {}; }
 }
 
+function getContagensOperacionais(): Raw {
+  if (typeof window === 'undefined') return {};
+  try {
+    const lista = JSON.parse(localStorage.getItem('cardapio.v1.contagemRefeicoes') ?? '[]') as Array<{
+      data?: string;
+      almoco?: number;
+      jantar?: number;
+    }>;
+    if (!Array.isArray(lista)) return {};
+    const out: Raw = {};
+    for (const r of lista) {
+      if (!r?.data) continue;
+      const almoco = Number(r.almoco ?? 0);
+      const jantar = Number(r.jantar ?? 0);
+      if (!Number.isFinite(almoco) || !Number.isFinite(jantar) || almoco + jantar <= 0) continue;
+      out[r.data] = [almoco, jantar, almoco + jantar];
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 function getDados(): Raw {
-  return { ...(HISTORICO as unknown as Raw), ...getLocal() };
+  // Ordem de autoridade: seed histórico < legado local < operação atual.
+  // Assim uma contagem registrada hoje no fluxo oficial substitui a fotografia antiga.
+  return { ...(HISTORICO as unknown as Raw), ...getLocal(), ...getContagensOperacionais() };
 }
 
 export function hojeISO(): string {

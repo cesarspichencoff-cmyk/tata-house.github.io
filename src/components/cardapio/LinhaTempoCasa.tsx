@@ -9,6 +9,7 @@
 
 import { useMemo } from 'react';
 import { linhaDoTempoCasa } from '@/lib/cardapio/refeicoes';
+import { useContagemRefeicoes } from '@/lib/cardapio/estado';
 
 function Sparkline({ valores }: { valores: number[] }) {
   if (valores.length < 2) return null;
@@ -34,7 +35,8 @@ function Sparkline({ valores }: { valores: number[] }) {
 }
 
 export function LinhaTempoCasa() {
-  const lt = useMemo(() => linhaDoTempoCasa(), []);
+  const { contagens } = useContagemRefeicoes();
+  const lt = useMemo(() => linhaDoTempoCasa(), [contagens]);
   if (!lt || lt.capitulos.length === 0) return null;
 
   return (
@@ -46,7 +48,7 @@ export function LinhaTempoCasa() {
           {lt.totalRefeicoes.toLocaleString('pt-BR')} refeições servidas
         </p>
         <p className="mt-1 text-sm text-areia-100/70">
-          desde {lt.inicio} · {lt.totalDias} dias de operação registrados
+          desde {lt.inicio} · {lt.totalDias} dias de operação registrados · histórico + operação atual
         </p>
         <div className="mt-3 text-brand-300/70">
           <Sparkline valores={lt.sparkline} />

@@ -175,6 +175,18 @@ export function AbaCotacao({
     setCadastrados((c) => new Set(c).add(idx));
   };
 
+  const novosComUnidade = soltos.filter((s) => {
+    const idx = lido?.indexOf(s) ?? -1;
+    return idx >= 0 && !cadastrados.has(idx) && !!(unidades[idx] ?? s.unid);
+  });
+
+  const assimilarNovosSeguros = () => {
+    novosComUnidade.forEach((s) => {
+      const idx = lido?.indexOf(s) ?? -1;
+      if (idx >= 0) cadastrarNovo(idx, s);
+    });
+  };
+
   const alternar = (item: string) =>
     setIgnorados((s) => {
       const novo = new Set(s);
@@ -348,10 +360,18 @@ export function AbaCotacao({
           {soltos.length > 0 && (
             <Cartao className="space-y-3">
               <div>
-                <h3 className="font-display text-lg font-semibold">{soltos.length} nomes ainda não relacionados</h3>
+                <h3 className="font-display text-lg font-semibold">{soltos.length} itens pedindo revisão</h3>
                 <p className="mt-1 text-xs leading-5 text-texto-suave">
-                  Cotação não vira catálogo automaticamente. Relacione o nome do fornecedor a um item que já existe ou crie um item novo escolhendo a unidade explicitamente.
+                  O House já tenta assimilar sozinho nomes, plurais, aliases e variações do fornecedor. Aqui ficam só os casos sem correspondência segura. Itens realmente novos que já trazem unidade podem ser criados de uma vez.
                 </p>
+                {novosComUnidade.length > 0 && (
+                  <button
+                    onClick={assimilarNovosSeguros}
+                    className="mt-3 w-full rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-brand-700"
+                  >
+                    Assimilar automaticamente {novosComUnidade.length} item{novosComUnidade.length === 1 ? '' : 'ns'} com unidade confirmada
+                  </button>
+                )}
               </div>
               <ul className="divide-y divide-carvao-100 dark:divide-carvao-700/60">
                 {soltos.map((s) => {

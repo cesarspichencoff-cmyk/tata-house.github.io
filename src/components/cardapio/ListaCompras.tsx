@@ -14,7 +14,8 @@
 import { useMemo, useState } from 'react';
 import { Botao, Cartao, Modal, Pilula, estiloInput } from '@/components/ui';
 import { Icone } from '@/components/Icones';
-import { DADOS, DIAS_SEMANA, formatarQtd, formatarReais, ingredienteBase, linhasDoDia, normalizar } from '@/lib/cardapio/motor';
+import { DADOS, DIAS_SEMANA, formatarQtd, formatarReais, ingredienteBase, normalizar } from '@/lib/cardapio/motor';
+import { linhasDoDiaComAprendizado } from '@/lib/cardapio/aprendizado-compras';
 import { resolverPreco } from '@/lib/cardapio/precos';
 import { ehRemetenteInterno } from '@/lib/cardapio/cotacao';
 import comparativoJson from '@/lib/cardapio/comparativo-fornecedores.json';
@@ -154,7 +155,7 @@ export function ListaCompras({
   const dias = useMemo(
     () =>
       estado.dias.map((dia, di) => {
-        const todas = linhasDoDia(estado, di, fatores, { mostrarBasicos });
+        const todas = linhasDoDiaComAprendizado(estado, di, fatores, { mostrarBasicos });
         const linhas = n ? todas.filter((l) => normalizar(l.item).includes(n)) : todas;
         const comprados = todas.filter((l) => l.status.compradoEm).length;
         const servido = [dia.principal, dia.guarnicaoFixa, dia.guarnicao, dia.salada, dia.sobremesa].filter(Boolean);
@@ -249,6 +250,7 @@ export function ListaCompras({
                           <span className="min-w-0 flex-1 text-sm font-medium">
                             {l.item}
                             {l.manual && <span className="ml-1 text-micro font-bold uppercase text-ouro-600">extra</span>}
+                            {l.fonte === 'aprendido_app' && <span className="ml-1 text-[9px] font-bold uppercase tracking-wide text-brand-600">aprendido</span>}
                           </span>
                           <input
                             type="number"
@@ -334,6 +336,7 @@ export function ListaCompras({
                           <span className={`block text-sm ${comprado ? 'text-texto-suave line-through' : 'font-medium'}`}>
                             {l.item}
                             {l.manual && <span className="ml-1 text-micro font-bold uppercase text-ouro-600">extra</span>}
+                            {l.fonte === 'aprendido_app' && <span className="ml-1 text-[9px] font-bold uppercase tracking-wide text-brand-600">aprendido</span>}
                             {!l.manual && l.fonte === 'receita' && (
                               <span className="ml-1 text-[9px] font-bold uppercase tracking-wide text-ouro-600/70">rcta</span>
                             )}

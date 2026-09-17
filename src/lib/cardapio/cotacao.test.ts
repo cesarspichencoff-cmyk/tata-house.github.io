@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente } from './cotacao';
+import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente, sugerirItemCotacao } from './cotacao';
 
 describe('cotação — remetente interno (Erika) não é fornecedor', () => {
   it('ehRemetenteInterno reconhece a Erika em várias grafias', () => {
@@ -141,5 +141,28 @@ describe('cotação — formato estruturado e seleção dimensional segura', () 
     expect(item!.ofertas).toBe(2);
     expect(item!.bloqueado).toBeFalsy();
     expect(item!.preco).toBeCloseTo(7.40, 2);
+  });
+});
+
+
+describe('cotação — assimilação automática conservadora', () => {
+  it('resolve plural simples sem pedir relacionamento manual', () => {
+    const sugestao = sugerirItemCotacao('ABACAXIS');
+    expect(sugestao.item?.toLowerCase()).toContain('abacaxi');
+    expect(sugestao.confianca).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('usa itens extras já aprendidos mesmo com qualificadores do fornecedor', () => {
+    const extras = { 'molho especial': { n: 'Molho especial', u: 'lt' } };
+    const agrupado = agruparCotacao([
+      { nome: 'Molho especial casa', preco: 19.9, marca: 'Fornecedor X', unid: 'lt', item: null },
+    ], extras);
+    expect(agrupado.soltos).toHaveLength(0);
+    expect(agrupado.casados[0]?.item).toBe('Molho especial');
+  });
+
+  it('não força match quando a evidência lexical é fraca', () => {
+    const sugestao = sugerirItemCotacao('Produto promocional código ZXQ');
+    expect(sugestao.item).toBeNull();
   });
 });

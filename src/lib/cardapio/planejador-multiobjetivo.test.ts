@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { normalizar } from './motor';
+import { normalizar, proteinaDoPrato } from './motor';
 import { gerarCenariosMultiobjetivo, cargaOperacionalPrato } from './planejador-multiobjetivo';
 import type { Aceitacao, DiaCardapio, EstadoSemana } from './tipos';
 
@@ -99,6 +99,20 @@ describe('planejador multiobjetivo', () => {
       }
     } finally {
       aleatorio.mockRestore();
+    }
+  }, 15_000);
+
+  it('não obriga frango a dominar a semana e preserva diversidade de proteína', () => {
+    const cenarios = gerarCenariosMultiobjetivo(contexto());
+    for (const cenario of cenarios) {
+      const proteinas = cenario.dias.map((d) => proteinaDoPrato(d.principal));
+      const frangos = proteinas.filter((p) => p === 'frango').length;
+      const maiorConcentracao = Math.max(...Array.from(new Set(proteinas)).map((p) => proteinas.filter((x) => x === p).length));
+      expect(frangos).toBeLessThanOrEqual(3);
+      expect(maiorConcentracao).toBeLessThanOrEqual(3);
+      for (let i = 1; i < proteinas.length; i += 1) {
+        if (proteinas[i] !== 'outros') expect(proteinas[i]).not.toBe(proteinas[i - 1]);
+      }
     }
   }, 15_000);
 

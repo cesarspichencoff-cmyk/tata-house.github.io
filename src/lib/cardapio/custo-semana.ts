@@ -33,6 +33,7 @@
    ===================================================================== */
 
 import { linhasDoDia, normalizar } from './motor';
+import { linhasDoDiaComAprendizado } from './aprendizado-compras';
 import { custoTipado, type CustoTipado } from './precos';
 import type { EstadoSemana } from './tipos';
 
@@ -41,6 +42,8 @@ export interface OpcoesCusto {
   fatores?: Record<string, number>;
   /** Incluir itens básicos (sal, óleo, tempero) — precisa bater com a lista. */
   mostrarBasicos?: boolean;
+  /** Aplicar memória de composição das listas operacionais do app. */
+  usarAprendizadoComposicao?: boolean;
 }
 
 /** Itens de UM dia, exatamente como aparecem na lista de compras. */
@@ -49,7 +52,8 @@ export function itensDoDiaParaCusto(
   diaIdx: number,
   opts: OpcoesCusto = {},
 ): { norm: string; qtd: number; unid: string }[] {
-  return linhasDoDia(estado, diaIdx, opts.fatores, { mostrarBasicos: opts.mostrarBasicos }).map(
+  const montar = opts.usarAprendizadoComposicao ? linhasDoDiaComAprendizado : linhasDoDia;
+  return montar(estado, diaIdx, opts.fatores, { mostrarBasicos: opts.mostrarBasicos }).map(
     (l) => ({ norm: normalizar(l.item), qtd: l.qtd, unid: l.unid }),
   );
 }

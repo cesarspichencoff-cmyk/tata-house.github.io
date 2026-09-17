@@ -69,6 +69,8 @@ export function semanaVazia(): EstadoSemana {
   const medias = lerLocal<Record<number, RegistroAprendizado>>('mediaRefeicoes', {});
   return {
     versao: 1,
+    // Opt-in apenas em semanas NOVAS. Semanas já salvas não têm este campo e permanecem congeladas.
+    listaInteligenciaVersao: 2,
     orcamento: null,
     dias: PESSOAS_PADRAO.map((pessoas, i) => ({
       pessoas: valorEfetivo(medias[i]) ? Math.round(valorEfetivo(medias[i])!) : pessoas,

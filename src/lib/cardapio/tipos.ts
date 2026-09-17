@@ -25,8 +25,9 @@ export interface DiaCardapio {
  * operacional_mapa  — saiu de um mapa de componente do dados.json
  * receita           — veio da biblioteca de receitas (gap-fill ou prato sem histórico)
  * fallback          — completado por heurística de texto/proteína padrão
+ * aprendido_app     — recorrência observada nas listas realmente ajustadas no app
  */
-export type FonteItem = 'operacional_combo' | 'operacional_mapa' | 'receita' | 'fallback';
+export type FonteItem = 'operacional_combo' | 'operacional_mapa' | 'receita' | 'fallback' | 'aprendido_app';
 
 /** Item sugerido pelo motor para a compra de um dia. */
 export interface ItemSugerido {
@@ -96,6 +97,8 @@ export interface NotaFiscal {
 
 export interface EstadoSemana {
   versao: 1;
+  /** v2 = composição aprendida habilitada somente para listas novas; ausente = lista legada congelada. */
+  listaInteligenciaVersao?: 2;
   orcamento: number | null;
   dias: DiaCardapio[]; // 7 posições, segunda a domingo
   etapa: Etapa;
