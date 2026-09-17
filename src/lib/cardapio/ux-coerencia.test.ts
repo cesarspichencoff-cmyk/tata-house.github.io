@@ -10,6 +10,7 @@ describe('coerência da experiência 10/10', () => {
     expect(page).toContain('<AbaAgora');
     expect(page).not.toContain('<PainelDiretor');
     expect(page).not.toContain('<CopilotoSemana');
+    expect(page).not.toContain('MiniEtapas');
   });
 
   it('expõe a inteligência viva como destino gerencial', () => {

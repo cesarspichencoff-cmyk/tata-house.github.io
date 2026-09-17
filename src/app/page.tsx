@@ -79,7 +79,6 @@ import { useLogin, abasDoPapel } from '@/lib/cardapio/login';
 import { Login } from '@/components/Login';
 import { TourOnboarding } from '@/components/TourOnboarding';
 import { pode } from '@/lib/cardapio/org';
-import type { Etapa } from '@/lib/cardapio/tipos';
 
 /* ── abas ────────────────────────────────────────────────── */
 
@@ -92,68 +91,6 @@ const ABAS = [
 ] as const;
 
 type AbaId = (typeof ABAS)[number]['id'];
-
-/* ── badge de etapa ──────────────────────────────────────── */
-
-const ROTULO_ETAPA: Record<Etapa, string> = {
-  rascunho:    'Rascunho',
-  cozinha:     'Na cozinha',
-  compras:     'Em compra',
-  recebimento: 'Recebendo',
-  concluido:   'Concluída',
-};
-
-const COR_ETAPA_TEXTO: Record<Etapa, string> = {
-  rascunho:    'text-texto-suave',
-  cozinha:     'text-ouro-600 dark:text-ouro-400',
-  compras:     'text-info dark:text-info-claro',
-  recebimento: 'text-ouro-600 dark:text-ouro-400',
-  concluido:   'text-brand-600 dark:text-brand-400',
-};
-
-const COR_ETAPA_PONTO: Record<Etapa, string> = {
-  rascunho:    'bg-carvao-300',
-  cozinha:     'bg-ouro-400 animate-pulse',
-  compras:     'bg-info',
-  recebimento: 'bg-ouro-400 animate-pulse',
-  concluido:   'bg-brand-500',
-};
-
-/* ── mini-stepper de etapas — espinha dorsal visível em todas as telas ── */
-
-const SEQ_ETAPAS: Etapa[] = ['rascunho', 'cozinha', 'compras', 'recebimento', 'concluido'];
-
-function MiniEtapas({ etapa, sufixo }: { etapa: Etapa; sufixo?: string }) {
-  const atual = SEQ_ETAPAS.indexOf(etapa);
-  const proxima = atual >= 0 && atual < SEQ_ETAPAS.length - 1 ? SEQ_ETAPAS[atual + 1] : null;
-  return (
-    <div className="space-y-1.5" aria-label={`Etapa: ${ROTULO_ETAPA[etapa]}`}>
-      <div className="flex items-center gap-1.5">
-        {SEQ_ETAPAS.map((e, i) => (
-          <span
-            key={e}
-            className={`h-1.5 rounded-full transition-all ${
-              i === atual ? 'w-7 bg-brand-600' : i < atual ? 'w-4 bg-brand-600/50' : 'w-4 bg-carvao-200 dark:bg-carvao-700'
-            }`}
-            title={ROTULO_ETAPA[e]}
-          />
-        ))}
-      </div>
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-rotulo font-semibold">
-        <span className={`inline-flex items-center gap-1.5 ${COR_ETAPA_TEXTO[etapa]}`}>
-          <span className={`h-2 w-2 rounded-full ${COR_ETAPA_PONTO[etapa]}`} />
-          {ROTULO_ETAPA[etapa]}
-        </span>
-        {sufixo && <span className="font-normal text-texto-suave">· {sufixo}</span>}
-        {proxima && (
-          <span className="font-normal text-texto-suave">
-            · próximo: <span className="font-semibold text-carvao-500 dark:text-carvao-300">{ROTULO_ETAPA[proxima]}</span>
-          </span>
-        )}
-      </p>
-    </div>
-  );
-}
 
 /* ── busca global ────────────────────────────────────────── */
 
@@ -754,12 +691,9 @@ export default function PaginaCardapios() {
             <h1 className="font-display text-2xl font-bold text-carvao-900 dark:text-white sm:text-3xl">
               {periodoSemana(semanaId)}
             </h1>
-            <div className="mt-2 max-w-xs">
-              <MiniEtapas
-                etapa={estado.etapa}
-                sufixo={semanaId === semanaAtualId ? 'semana atual' : 'semana planejada'}
-              />
-            </div>
+            <p className="mt-1 text-rotulo font-semibold text-texto-suave">
+              {semanaId === semanaAtualId ? 'Semana atual' : 'Semana planejada'}
+            </p>
           </div>
           <div className="flex items-center gap-1">
             <button
