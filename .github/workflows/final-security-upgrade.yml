@@ -1,0 +1,45 @@
+name: Final Security Upgrade
+
+on:
+  push:
+    branches:
+      - feat/tata-house-final-reconciled-20260917
+    paths:
+      - .github/workflows/final-security-upgrade.yml
+
+permissions:
+  contents: write
+
+jobs:
+  upgrade-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Upgrade runtime and test toolchain to patched lines
+        run: |
+          npm install next@15.5.25 --save-exact
+          npm install --save-dev eslint-config-next@15.5.25 vitest@5.0.1 postcss@8.5.23 --save-exact
+          npm audit fix
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Block critical vulnerabilities anywhere
+        run: npm audit --audit-level=critical
+      - name: Block high or critical runtime vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
+      - name: Persist only verified dependency changes
+        run: |
+          git config user.name "TATA House CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No dependency changes"
+          else
+            git commit -m "[house-final] chore(security): atualizar dependências críticas"
+            git push
+          fi
