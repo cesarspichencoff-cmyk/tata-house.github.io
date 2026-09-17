@@ -111,7 +111,7 @@ export function AbaCotacao({
     try {
       // A IA de cotação só é habilitada pelo proxy seguro de servidor. O
       // navegador não guarda nem recebe chave privada de provedor.
-      const { linhas, comIA, erroIA } = await parsearCotacaoComIA(texto, '', fornecedoresList);
+      const { linhas, comIA, erroIA } = await parsearCotacaoComIA(texto, fornecedoresList);
       setLido(linhas);
       setModoUsado(comIA ? 'combo' : 'logica');
       if (erroIA) setIaErro(erroIA);

@@ -522,7 +522,6 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
 
 /* ------------------- integração Gemini IA ----------------------------- */
 
-const GROQ_MODELO = 'llama-3.3-70b-versatile';
 
 function buildPromptIA(fornecedores: string[]): string {
   const listForn = fornecedores.length
@@ -579,25 +578,6 @@ function parseItensIA(txt: string): LinhaCotacao[] {
     });
 }
 
-async function chamarGroqDireto(prompt: string, apiKey: string): Promise<string> {
-  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: GROQ_MODELO,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-    }),
-  });
-  if (!resp.ok) {
-    const err: { error?: { message?: string } } = await resp.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `HTTP ${resp.status}`);
-  }
-  const data: { choices?: { message?: { content?: string } }[] } = await resp.json();
-  return data?.choices?.[0]?.message?.content ?? '{}';
-}
-
 /**
  * Combina resultados da lógica (preços confiáveis) e da IA (contexto e nomes):
  * - Lógica é autoritativa em preços e matches já conhecidos
@@ -649,16 +629,15 @@ function combinarResultados(logica: LinhaCotacao[], ia: LinhaCotacao[]): LinhaCo
  */
 export async function parsearCotacaoComIA(
   texto: string,
-  apiKey: string,
   fornecedoresCustom: string[] = [],
 ): Promise<{ linhas: LinhaCotacao[]; comIA: boolean; erroIA?: string }> {
   const logica = parsearCotacao(texto, fornecedoresCustom);
   const prompt = buildGroqPrompt(texto, fornecedoresCustom);
+  if (!iaEdgeAtivo()) {
+    return { linhas: logica, comIA: false, erroIA: 'IA segura do servidor não configurada; leitura lógica preservada.' };
+  }
   try {
-    // Edge Function (chave no servidor) quando ativada; senão, Groq direto.
-    const txt = iaEdgeAtivo()
-      ? await chamarEdge('groq', '', prompt, true)
-      : await chamarGroqDireto(prompt, apiKey);
+    const txt = await chamarEdge('groq', '', prompt, true);
     return { linhas: combinarResultados(logica, parseItensIA(txt)), comIA: true };
   } catch (e) {
     return { linhas: logica, comIA: false, erroIA: e instanceof Error ? e.message : String(e) };

@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Botao, Cartao, Pilula, estiloInput, estiloRotulo } from '@/components/ui';
 import { Icone } from '@/components/Icones';
 import { normalizar } from '@/lib/cardapio/motor';
 import { comprimirImagem, lerNotaFiscalViaIA } from '@/lib/cardapio/nf-leitura';
 import { useGastos } from '@/lib/cardapio/gastos';
 import type { ItemNotaExtraido, ResultadoLeituraNF } from '@/lib/cardapio/nf-leitura';
+import { iaEdgeAtivo } from '@/lib/cardapio/ia-cliente';
 
-const CHAVE_GROQ = 'cardapio.v1.groq.key';
 
 function formatarReais(v: number): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -36,7 +36,6 @@ export function AbaNF({
 }) {
   const { registrar: registrarGasto } = useGastos();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [groqKey, setGroqKey] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [resultado, setResultado] = useState<ResultadoLeituraNF | null>(null);
@@ -45,9 +44,6 @@ export function AbaNF({
   const [erro, setErro] = useState<string | null>(null);
   const [fileData, setFileData] = useState<{ base64: string; mimeType: string } | null>(null);
 
-  useEffect(() => {
-    try { setGroqKey(localStorage.getItem(CHAVE_GROQ) ?? ''); } catch { /* ok */ }
-  }, []);
 
   const handleArquivo = async (file: File) => {
     setResultado(null);
@@ -72,8 +68,7 @@ export function AbaNF({
     setCarregando(true);
     setErro(null);
     try {
-      const chaveEfetiva = (process.env.NEXT_PUBLIC_GROQ_KEY ?? '').trim() || groqKey.trim();
-      const res = await lerNotaFiscalViaIA(fileData.base64, fileData.mimeType, chaveEfetiva);
+      const res = await lerNotaFiscalViaIA(fileData.base64, fileData.mimeType);
       setResultado(res);
       if (res.erro) {
         setErro(res.erro);
@@ -137,13 +132,13 @@ export function AbaNF({
     setTimeout(() => setAplicado(false), 3000);
   };
 
-  const temChave = !!(process.env.NEXT_PUBLIC_GROQ_KEY || groqKey.trim());
+  const iaSeguraAtiva = iaEdgeAtivo();
 
   return (
     <div className="space-y-5">
-      {!temChave && (
+      {!iaSeguraAtiva && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-800/40 dark:bg-amber-950/30 dark:text-amber-300">
-          Configure a chave Groq na aba <strong>Cotação</strong> para habilitar leitura de NF por IA.
+          A leitura de NF por IA exige a camada segura do servidor. Nenhuma chave privada é armazenada neste aparelho.
         </div>
       )}
 
@@ -183,7 +178,7 @@ export function AbaNF({
         {preview && !resultado && (
           <Botao
             onClick={analisar}
-            disabled={carregando || !fileData || !temChave}
+            disabled={carregando || !fileData || !iaSeguraAtiva}
             className="mt-4 w-full"
           >
             {carregando ? (

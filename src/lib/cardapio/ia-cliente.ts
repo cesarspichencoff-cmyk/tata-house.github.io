@@ -17,6 +17,11 @@ export interface RespostaIA {
   offline?: boolean;
 }
 
+export interface ImagemIAEdge {
+  base64: string;
+  mimeType: string;
+}
+
 const SYSTEM = `Você é o assistente operacional do Tatá House, um restaurante corporativo brasileiro.
 Você recebe um dossiê com dados reais pré-calculados pelo sistema (custos, estoque, aceitação, etc.).
 
@@ -70,6 +75,7 @@ export async function chamarEdge(
   system: string,
   prompt: string,
   comoJson: boolean,
+  imagem?: ImagemIAEdge,
 ): Promise<string> {
   const fnUrl = urlEdgeLLM();
   if (!fnUrl) throw new Error('IA segura não configurada');
@@ -78,7 +84,7 @@ export async function chamarEdge(
   const res = await fetch(fnUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${anon}`, apikey: anon },
-    body: JSON.stringify({ provider, system, prompt, json: comoJson }),
+    body: JSON.stringify({ provider, system, prompt, json: comoJson, ...(imagem ? { image: imagem } : {}) }),
   });
   if (!res.ok) throw new Error(`edge ${res.status}`);
   const data = await res.json();
