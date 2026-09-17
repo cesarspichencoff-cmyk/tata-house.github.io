@@ -21,11 +21,12 @@ s = p.read_text(encoding='utf-8')
 anchor = """  it('compara demanda somente nos dias com realizado e explicita cobertura parcial', () => {
 """
 test = """  it('não classifica lançamento manual como nota fiscal comprovada', () => {
-    const e = entrada();
-    e.lancamentos = [
-      { id: 'm1', data: '2026-09-15', fornecedor: 'Ajuste manual', total: 321, itens: [], origem: 'manual' as const, em: '2026-09-15T11:00:00Z' },
-    ];
-    const r = construirInteligenciaViva(e);
+    const r = construirInteligenciaViva({
+      ...entrada(),
+      lancamentos: [
+        { id: 'm1', data: '2026-09-15', fornecedor: 'Ajuste manual', total: 321, itens: [], origem: 'manual' as const, em: '2026-09-15T11:00:00Z' },
+      ],
+    });
     expect(r.notasFiscais.valor).toBeNull();
     expect(r.notasFiscais.classe).toBe('indisponivel');
     expect(r.notasFiscais.coberturaPct).toBe(0);
