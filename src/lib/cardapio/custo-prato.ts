@@ -1,9 +1,10 @@
 /* =====================================================================
    Motor de custo real por prato — cruza ingredientes do dados.json
-   com os preços atuais e retorna custo por porção.
+   com a mesma resolução canônica de preços usada pelo restante do House.
    ===================================================================== */
 
-import { DADOS, normalizar } from './motor';
+import { DADOS, converterParaUnidadeBase, normalizar } from './motor';
+import { resolverPreco, type TipoPreco } from './precos';
 import type { DiaCardapio } from './tipos';
 
 export interface IngredienteCusto {
@@ -11,9 +12,12 @@ export interface IngredienteCusto {
   norm: string;
   qtd: number;
   unid: string;
+  /** Unidade em que o preço resolvido é aplicado (g→kg, ml→lt). */
+  unidPreco: string;
   precoUnit: number;
   custo: number;
   temPreco: boolean;
+  origemPreco: TipoPreco;
 }
 
 export interface CustoPorcao {
@@ -24,7 +28,7 @@ export interface CustoPorcao {
   custoTotal: number;
   custoPorcao: number;
   pessoas: number;
-  /** 0–1: proporção de ingredientes com preço cadastrado */
+  /** 0–1: proporção de ingredientes com alguma referência de preço resolvida */
   cobertura: number;
   /** true = dados de mapa individual; false = inferido de combo */
   deMapa: boolean;
@@ -45,23 +49,38 @@ DADOS.mapas.forEach((m) => {
 const NOME_ORIGINAL = new Map<string, string>();
 DADOS.itens.forEach((i) => NOME_ORIGINAL.set(normalizar(i.n), i.n));
 
+function unidadePreco(unid: string): string {
+  if (unid === 'g') return 'kg';
+  if (unid === 'ml') return 'lt';
+  return unid;
+}
+
 function calcularIngredientes(
   itens: { i: string; q: number; u: string | null }[],
   precos: Record<string, number>,
+  estimativas: Record<string, number>,
   escala: number,
 ): IngredienteCusto[] {
   return itens.map((it) => {
     const itNorm = normalizar(it.i);
     const qtd = it.q * escala;
-    const precoUnit = precos[itNorm] ?? 0;
+    const unid = it.u ?? 'un';
+    // Fonte única de verdade para preço: cotação real → histórico → estimativa
+    // → ingrediente-base. Assim "Tiras de Carne", aliases e preparos resolvem
+    // da mesma forma no cardápio, na lista e no custo por prato.
+    const resolvido = resolverPreco(itNorm, precos, estimativas);
+    const precoUnit = resolvido.valor;
+    const qtdBase = converterParaUnidadeBase(qtd, unid);
     return {
       item: NOME_ORIGINAL.get(itNorm) ?? it.i,
       norm: itNorm,
       qtd,
-      unid: it.u ?? 'un',
+      unid,
+      unidPreco: unidadePreco(unid),
       precoUnit,
-      custo: precoUnit * qtd,
-      temPreco: precoUnit > 0,
+      custo: precoUnit * qtdBase,
+      temPreco: resolvido.tipo !== 'sem' && precoUnit > 0,
+      origemPreco: resolvido.tipo,
     };
   });
 }
@@ -75,6 +94,7 @@ export function calcularCustoPrato(
   categoria: string,
   precos: Record<string, number>,
   pessoas: number,
+  estimativas: Record<string, number> = {},
 ): CustoPorcao | null {
   if (!prato || pessoas <= 0) return null;
   const norm = normalizar(prato);
@@ -82,7 +102,7 @@ export function calcularCustoPrato(
 
   const itensMapas = MAPA_IDX.get(norm);
   if (itensMapas && itensMapas.length > 0) {
-    const ingredientes = calcularIngredientes(itensMapas, precos, escala);
+    const ingredientes = calcularIngredientes(itensMapas, precos, estimativas, escala);
     const custoTotal = ingredientes.reduce((s, i) => s + i.custo, 0);
     const comPreco = ingredientes.filter((i) => i.temPreco).length;
     return {
@@ -109,7 +129,7 @@ export function calcularCustoPrato(
   );
   if (!combo || combo.itens.length === 0) return null;
 
-  const ingredientes = calcularIngredientes(combo.itens, precos, escala);
+  const ingredientes = calcularIngredientes(combo.itens, precos, estimativas, escala);
   const custoTotal = ingredientes.reduce((s, i) => s + i.custo, 0);
   const comPreco = ingredientes.filter((i) => i.temPreco).length;
   return {
@@ -129,6 +149,7 @@ export function calcularCustoPrato(
 export function calcularCustosSemana(
   dias: DiaCardapio[],
   precos: Record<string, number>,
+  estimativas: Record<string, number> = {},
 ): CustoPorcao[] {
   const vistos = new Set<string>();
   const resultado: CustoPorcao[] = [];
@@ -148,7 +169,7 @@ export function calcularCustosSemana(
       const norm = normalizar(prato);
       if (vistos.has(norm)) return;
       vistos.add(norm);
-      const custo = calcularCustoPrato(prato, cat, precos, dia.pessoas);
+      const custo = calcularCustoPrato(prato, cat, precos, dia.pessoas, estimativas);
       if (custo) resultado.push(custo);
     });
   });
