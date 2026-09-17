@@ -12,6 +12,13 @@ const COR_COBERTURA = (c: number) =>
   c >= 0.6 ? 'text-ouro-600 dark:text-ouro-300' :
   'text-perigo dark:text-perigo-claro';
 
+const ROTULO_ORIGEM_PRECO = {
+  real: 'cotação atual',
+  historico: 'histórico',
+  estimado: 'estimativa',
+  sem: 'sem preço',
+} as const;
+
 function BarraCusto({ valor, max }: { valor: number; max: number }) {
   const pct = max > 0 ? (valor / max) * 100 : 0;
   const cor = pct > 70 ? 'bg-perigo' : pct > 40 ? 'bg-ouro-400' : 'bg-brand-500';
@@ -65,7 +72,9 @@ function DetalheIngredientes({ custo, onFechar }: { custo: CustoPorcao; onFechar
                   <p className="truncate text-sm font-semibold text-carvao-800 dark:text-areia-100">{ing.item}</p>
                   <p className="text-xs text-texto-suave">
                     {ing.qtd.toFixed(2)} {ing.unid}
-                    {ing.temPreco ? ` · R$ ${ing.precoUnit.toFixed(2)}/${ing.unid}` : ' · sem preço'}
+                    {ing.temPreco
+                      ? ` · R$ ${ing.precoUnit.toFixed(2)}/${ing.unidPreco} · ${ROTULO_ORIGEM_PRECO[ing.origemPreco]}`
+                      : ' · sem preço'}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
@@ -88,7 +97,7 @@ function DetalheIngredientes({ custo, onFechar }: { custo: CustoPorcao; onFechar
 
         {custo.cobertura < 1 && (
           <p className="mt-4 text-center text-xs text-texto-suave">
-            {Math.round((1 - custo.cobertura) * custo.ingredientes.length)} ingrediente(s) sem preço cadastrado — custo subestimado.
+            {Math.round((1 - custo.cobertura) * custo.ingredientes.length)} ingrediente(s) sem referência de preço — o total permanece incompleto.
           </p>
         )}
       </div>
@@ -149,8 +158,6 @@ export function AbaCustoPrato({
         <Kpi rotulo="Mais barato" valor={`R$ ${(maisBarato?.custoPorcao ?? 0).toFixed(2).replace('.', ',')}`} tom="verde" />
       </div>
 
-
-      {/* Filtro por categoria */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {categorias.map((cat) => (
           <button
@@ -191,7 +198,7 @@ export function AbaCustoPrato({
                         {c.categoria}
                       </span>
                       <span className={`text-micro font-semibold ${COR_COBERTURA(c.cobertura)}`}>
-                        {Math.round(c.cobertura * 100)}% de ingredientes com preço
+                        {Math.round(c.cobertura * 100)}% de ingredientes com referência de preço
                       </span>
                       {!c.deMapa && (
                         <span className="text-micro text-texto-suave">estimado</span>
