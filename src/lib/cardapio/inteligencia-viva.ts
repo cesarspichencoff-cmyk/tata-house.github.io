@@ -263,7 +263,7 @@ export function construirInteligenciaViva(entrada: EntradaInteligenciaViva): Int
 
   const comprado = custoComprado(entrada);
   const datas = new Set(entrada.datasSemana);
-  const nfsSemana = entrada.lancamentos.filter((l) => datas.has(l.data));
+  const nfsSemana = entrada.lancamentos.filter((l) => datas.has(l.data) && l.origem === 'nf');
   const totalNf = nfsSemana.reduce((s, l) => s + Math.max(0, l.total), 0);
 
   let desperdicioValor = 0;
