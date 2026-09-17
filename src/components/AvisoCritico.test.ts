@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   armazenamentoCheioMasConfirmadoNaNuvem,
   mensagemArmazenamentoCheio,
-} from '@/lib/cardapio/aviso-critico';
+} from '../lib/cardapio/aviso-critico';
 
 describe('AvisoCritico', () => {
   it('nao promete preservacao quando cache cheio e nuvem falha', () => {
