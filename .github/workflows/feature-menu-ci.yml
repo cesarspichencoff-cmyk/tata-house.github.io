@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/menu-intelligence-engine-20260916
+  pull_request:
+    branches:
+      - fix/storage-durability-signal-20260916
   workflow_dispatch:
 
 jobs:
