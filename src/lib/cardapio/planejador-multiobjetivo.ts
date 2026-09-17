@@ -319,7 +319,7 @@ function buscarPrincipais(
           pratos: [...estado.pratos, sinal.nome],
           score: estado.score + scorePrato(sinal, modo, pessoas[dia], mediaPessoas, diasBase[dia]?.principal ?? '') + diversidade + bonusProteinaNova,
           contagem,
-          familias: new Set([...estado.familias, sinal.familia]),
+          familias: new Set(Array.from(estado.familias).concat(sinal.familia)),
           tecnicas,
           ultimo: sinal.proteina,
         });
