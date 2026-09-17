@@ -134,7 +134,8 @@ export function estimarValorDesperdicio(
 ): { valor: number | null; cobertura: number; metodo: 'porcao' | 'kg-producao' | 'sem-base' } {
   const sobra = Math.max(0, registro.produzido - registro.consumido);
   if (!(sobra > 0)) return { valor: 0, cobertura: 1, metodo: 'porcao' };
-  const pessoas = Math.max(1, entrada.estado.dias[registro.dia]?.pessoas ?? Math.round(registro.produzido) || 1);
+  const pessoasBase = entrada.estado.dias[registro.dia]?.pessoas ?? Math.max(1, Math.round(registro.produzido));
+  const pessoas = Math.max(1, pessoasBase);
   const custo = calcularCustoPrato(registro.prato, 'Principal', entrada.precos, pessoas, entrada.estimativas);
   if (!custo || !(custo.custoTotal > 0) || custo.cobertura < 0.4) {
     return { valor: null, cobertura: custo?.cobertura ?? 0, metodo: 'sem-base' };
@@ -143,8 +144,6 @@ export function estimarValorDesperdicio(
     return { valor: arred(sobra * custo.custoPorcao), cobertura: custo.cobertura, metodo: 'porcao' };
   }
   if (registro.produzido > 0) {
-    // O usuário informou o rendimento produzido em kg. Distribuímos o custo
-    // estimado do principal pelo rendimento informado; não tratamos kg como porção.
     const custoKg = custo.custoTotal / registro.produzido;
     return { valor: arred(sobra * custoKg), cobertura: custo.cobertura, metodo: 'kg-producao' };
   }
@@ -179,19 +178,19 @@ function oportunidadeCotacao(entrada: EntradaInteligenciaViva): { total: number;
   const qtds = quantidadesSemana(entrada);
   let total = 0;
   let comparados = 0;
-  for (const [item, qtd] of qtds) {
+  Array.from(qtds.entries()).forEach(([item, qtd]) => {
     const lista = (entrada.ofertas[item] ?? []).filter((o) => o.preco > 0);
-    if (lista.length < 2) continue;
+    if (lista.length < 2) return;
     const menor = Math.min(...lista.map((o) => o.preco));
     const fornecedorAtual = entrada.fornecedores[item]?.toLowerCase();
     const ofertaAtual = fornecedorAtual
       ? lista.find((o) => o.fornecedor.toLowerCase() === fornecedorAtual)
       : undefined;
     const atual = ofertaAtual?.preco ?? resolverPreco(item, entrada.precos, entrada.estimativas).valor;
-    if (!(atual > 0)) continue;
+    if (!(atual > 0)) return;
     comparados += 1;
     total += Math.max(0, atual - menor) * qtd;
-  }
+  });
   return { total, comparados };
 }
 
@@ -199,16 +198,16 @@ function pressaoDePreco(entrada: EntradaInteligenciaViva): { total: number; comp
   const qtds = quantidadesSemana(entrada);
   let total = 0;
   let comparados = 0;
-  for (const [item, qtd] of qtds) {
+  Array.from(qtds.entries()).forEach(([item, qtd]) => {
     const hist = [...(entrada.historicoPrecos[item] ?? [])].sort((a, b) => a.em.localeCompare(b.em));
-    if (hist.length < 2) continue;
+    if (hist.length < 2) return;
     const atual = resolverPreco(item, entrada.precos, entrada.estimativas).valor;
-    if (!(atual > 0)) continue;
+    if (!(atual > 0)) return;
     const anterior = hist[hist.length - 2]?.valor;
-    if (!(anterior > 0)) continue;
+    if (!(anterior > 0)) return;
     comparados += 1;
     total += Math.max(0, atual - anterior) * qtd;
-  }
+  });
   return { total, comparados };
 }
 
