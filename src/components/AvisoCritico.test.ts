@@ -1,17 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('@/lib/cardapio/aviso-armazenamento', () => ({
-  useArmazenamentoLocalCheio: () => false,
-}));
-
-vi.mock('@/lib/cardapio/supabase', () => ({
-  useStatusNuvem: () => ({ status: 'online', erroDesde: null, pendentes: 0 }),
-}));
-
+import { describe, expect, it } from 'vitest';
 import {
   armazenamentoCheioMasConfirmadoNaNuvem,
   mensagemArmazenamentoCheio,
-} from './AvisoCritico';
+} from '@/lib/cardapio/aviso-critico';
 
 describe('AvisoCritico', () => {
   it('nao promete preservacao quando cache cheio e nuvem falha', () => {
