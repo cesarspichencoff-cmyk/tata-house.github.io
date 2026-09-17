@@ -23,7 +23,7 @@ jobs:
       - name: Upgrade runtime and test toolchain to patched lines
         run: |
           npm install next@16.3.5 react@19.3.0 react-dom@19.3.0 --save-exact
-          npm install --save-dev @types/react@19.3.0 @types/react-dom@19.3.0 eslint-config-next@16.3.5 vitest@4.1.11 postcss@8.5.23 --save-exact
+          npm install --save-dev eslint@10.10.0 eslint-config-next@16.3.5 @types/react@19.3.0 @types/react-dom@19.3.0 vitest@4.1.11 postcss@8.5.23 --save-exact
           npm audit fix || true
       - run: npm run typecheck
       - run: npm test
