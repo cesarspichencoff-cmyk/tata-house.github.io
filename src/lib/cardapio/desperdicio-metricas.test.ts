@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resumirDesperdicioPorUnidade } from './desperdicio-metricas';
+import { resumirDesperdicioPorUnidade, taxaMediaDesperdicio } from './desperdicio-metricas';
 import type { RegistroDesperdicio } from './tipos';
 
 function reg(id: string, unid: RegistroDesperdicio['unid'], produzido: number, consumido: number): RegistroDesperdicio {
@@ -24,5 +24,13 @@ describe('métricas de desperdício por unidade', () => {
     expect(r['porções'].consumido).toBe(10);
     expect(r['porções'].sobra).toBe(0);
     expect(r['porções'].taxa).toBe(0);
+  });
+
+  it('permite uma taxa média entre unidades sem somar quantidades físicas', () => {
+    const taxa = taxaMediaDesperdicio([
+      reg('p1', 'porções', 100, 80), // 20%
+      reg('k1', 'kg', 2, 1),         // 50%
+    ]);
+    expect(taxa).toBeCloseTo(0.35);
   });
 });
