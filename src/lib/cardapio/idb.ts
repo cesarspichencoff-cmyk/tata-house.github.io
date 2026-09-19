@@ -101,6 +101,39 @@ export async function idbTodos<T>(loja: LojaIdb): Promise<T[]> {
   });
 }
 
+export interface EntradaIdb<T> {
+  chave: IDBValidKey;
+  valor: T;
+}
+
+/**
+ * Enumeração somente-leitura de uma object store.
+ * Útil para diagnóstico/export local sem conhecer previamente as chaves.
+ * Nunca abre transação de escrita.
+ */
+export async function idbEntradas<T>(loja: LojaIdb): Promise<EntradaIdb<T>[]> {
+  const db = await abrirDb();
+  if (!db) return [];
+  return new Promise((resolve) => {
+    const out: EntradaIdb<T>[] = [];
+    try {
+      const req = db.transaction(loja, 'readonly').objectStore(loja).openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) {
+          resolve(out);
+          return;
+        }
+        out.push({ chave: cursor.key, valor: cursor.value as T });
+        cursor.continue();
+      };
+      req.onerror = () => resolve(out);
+    } catch {
+      resolve(out);
+    }
+  });
+}
+
 export interface DiagnosticoIdb {
   ok: boolean;
   gravacao: boolean;
