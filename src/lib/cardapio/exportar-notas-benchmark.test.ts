@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { montarPacoteNotasBenchmark } from './exportar-notas-benchmark';
 
@@ -93,5 +94,24 @@ describe('exportação read-only de notas para benchmark', () => {
     expect(a.notes[0]?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(a.notes[0]?.id).toBe(b.notes[0]?.id);
     expect(a.notes[0]?.sha256).toBe(b.notes[0]?.sha256);
+  });
+});
+
+
+describe('contrato de fonte estritamente read-only', () => {
+  it('não cria/atualiza IndexedDB nem escreve em localStorage durante a coleta', () => {
+    const source = readFileSync(
+      new URL('./exportar-notas-benchmark.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("indexedDB.open(DB_NOME)");
+    expect(source).toContain("req.transaction?.abort()");
+    expect(source).toContain("db.transaction(LOJA_ESTADO, 'readonly')");
+    expect(source).not.toContain("idbEntradas");
+    expect(source).not.toContain("'readwrite'");
+    expect(source).not.toContain('localStorage.setItem');
+    expect(source).not.toContain('localStorage.removeItem');
+    expect(source).not.toContain('localStorage.clear');
   });
 });
