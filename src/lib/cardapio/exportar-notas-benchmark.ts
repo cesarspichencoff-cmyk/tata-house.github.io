@@ -1,11 +1,12 @@
 'use client';
 
-import { idbEntradas, type EntradaIdb } from './idb';
 import type { AnexosSemana } from './anexos-semana';
 import type { EstadoSemana, NotaFiscal } from './tipos';
 
 const PREFIXO_LOCAL = 'cardapio.v1.semana.';
 const PREFIXO_ANEXO = 'anexos.semana.';
+const DB_NOME = 'tata-house-v2';
+const LOJA_ESTADO = 'estado';
 
 export type FonteNotaBenchmark = 'INDEXEDDB_NOTAS_FISCAIS' | 'INDEXEDDB_NOTA_LEGADO' | 'LOCALSTORAGE_NOTAS_FISCAIS' | 'LOCALSTORAGE_NOTA_LEGADO';
 
@@ -187,6 +188,89 @@ export async function montarPacoteNotasBenchmark(
   };
 }
 
+async function lerEntradasIdbExistenteSomenteLeitura(): Promise<EntradaAnexoBenchmark[]> {
+  if (typeof indexedDB === 'undefined') return [];
+
+  return new Promise((resolve) => {
+    let resolveu = false;
+    const concluir = (valor: EntradaAnexoBenchmark[]) => {
+      if (resolveu) return;
+      resolveu = true;
+      resolve(valor);
+    };
+
+    try {
+      // Sem versão: nunca solicita upgrade deliberadamente.
+      // Se o banco não existir, o browser dispara onupgradeneeded; abortamos
+      // a transação para impedir criação de banco/object stores.
+      const req = indexedDB.open(DB_NOME);
+
+      req.onupgradeneeded = () => {
+        try {
+          req.transaction?.abort();
+        } catch {
+          // fail closed
+        }
+        try {
+          req.result.close();
+        } catch {
+          // noop
+        }
+        concluir([]);
+      };
+
+      req.onerror = () => concluir([]);
+      req.onblocked = () => concluir([]);
+
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(LOJA_ESTADO)) {
+          db.close();
+          concluir([]);
+          return;
+        }
+
+        const out: EntradaAnexoBenchmark[] = [];
+        try {
+          const tx = db.transaction(LOJA_ESTADO, 'readonly');
+          const cursor = tx.objectStore(LOJA_ESTADO).openCursor();
+
+          cursor.onsuccess = () => {
+            const atual = cursor.result;
+            if (!atual) return;
+            if (typeof atual.key === 'string' && atual.key.startsWith(PREFIXO_ANEXO)) {
+              out.push({ chave: atual.key, valor: atual.value });
+            }
+            atual.continue();
+          };
+
+          cursor.onerror = () => {
+            db.close();
+            concluir(out);
+          };
+          tx.oncomplete = () => {
+            db.close();
+            concluir(out);
+          };
+          tx.onerror = () => {
+            db.close();
+            concluir(out);
+          };
+          tx.onabort = () => {
+            db.close();
+            concluir(out);
+          };
+        } catch {
+          db.close();
+          concluir([]);
+        }
+      };
+    } catch {
+      concluir([]);
+    }
+  });
+}
+
 function lerLegadoLocalStorage(): EntradaAnexoBenchmark[] {
   if (typeof window === 'undefined') return [];
   const out: EntradaAnexoBenchmark[] = [];
@@ -209,10 +293,7 @@ function lerLegadoLocalStorage(): EntradaAnexoBenchmark[] {
 }
 
 export async function coletarPacoteNotasBenchmark(): Promise<PacoteNotasBenchmark> {
-  const idb = await idbEntradas<unknown>('estado');
-  const entradasIdb = idb
-    .filter((e: EntradaIdb<unknown>) => typeof e.chave === 'string' && e.chave.startsWith(PREFIXO_ANEXO))
-    .map((e) => ({ chave: String(e.chave), valor: e.valor }));
+  const entradasIdb = await lerEntradasIdbExistenteSomenteLeitura();
   return montarPacoteNotasBenchmark(entradasIdb, lerLegadoLocalStorage());
 }
 
