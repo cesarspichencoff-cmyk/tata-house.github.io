@@ -166,3 +166,52 @@ describe('cotação — assimilação automática conservadora', () => {
     expect(sugestao.item).toBeNull();
   });
 });
+
+
+describe('cotação — corpus estrutural real de 22/09/2026', () => {
+  it('rótulo de fornecedor com seta para cima vale para a mensagem anterior', () => {
+    const texto = [
+      '[22/09/2026, 10:03:00] Tatá Sushi Compras - Érika: Tiras de carnes R$ 39,90',
+      'Tiras de Frangos R$ 19,90',
+      '[22/09/2026, 10:03:07] Tatá Sushi Compras - Érika: WG👆🏾',
+    ].join('\n');
+    const linhas = parsearCotacao(texto);
+    expect(linhas).toHaveLength(2);
+    expect(linhas.every((l) => l.marca === 'WG')).toBe(true);
+  });
+
+  it('fornecedor explícito do próprio bloco vence anotação posterior conflitante', () => {
+    const texto = [
+      '[22/09/2026, 10:01:22] Tatá Sushi Compras - Érika: PROMOÇÕES SULBEEF',
+      'Acém Pesado 31,20',
+      '[22/09/2026, 10:01:29] Tatá Sushi Compras - Érika: Jampac👆🏾',
+    ].join('\n');
+    const [linha] = parsearCotacao(texto);
+    expect(linha?.marca).toBe('Sulbeef');
+  });
+
+  it('aceita a grafia Apetitto numa etiqueta posterior sem transformar Erika em fornecedor', () => {
+    const texto = [
+      '[22/09/2026, 10:01:47] Tatá Sushi Compras - Érika: Acém 30,40',
+      '[22/09/2026, 10:01:57] Tatá Sushi Compras - Érika: Apetitto👆🏾',
+    ].join('\n');
+    const [linha] = parsearCotacao(texto);
+    expect(linha?.marca).toBe('Apetito Foods');
+  });
+
+  it('preserva cortes diferentes em vez de fundir tudo num item genérico', () => {
+    expect(sugerirItemCotacao('Filé de Peito').item).toBe('Filé de peito');
+    expect(sugerirItemCotacao('Sassami').item).toBe('Filezinho sassami');
+    expect(sugerirItemCotacao('Bife Ancho').item).toBeNull();
+    expect(sugerirItemCotacao('Lombinho Bovino').item).toBeNull();
+    expect(sugerirItemCotacao('Costela Janela').item).toBeNull();
+    expect(sugerirItemCotacao('Batata 9mm Surecrisp').item).toBeNull();
+  });
+
+  it('mantém linhas multiunidade de tabela de hortifruti separadas para validação dimensional', () => {
+    const linhas = parsearCotacao('ALHO CX 298,00 ALHO UN 2,98 ALHO KG 29,80');
+    expect(linhas).toHaveLength(3);
+    expect(linhas.map((l) => l.unid)).toEqual(['cx', 'un', 'kg']);
+    expect(linhas.map((l) => l.preco)).toEqual([298, 2.98, 29.8]);
+  });
+});
