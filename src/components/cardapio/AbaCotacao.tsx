@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Botao, Cartao } from '@/components/ui';
-import { agruparCotacao, extrairRemetenteWhatsApp, parsearCotacao, parsearCotacaoComIA } from '@/lib/cardapio/cotacao';
+import { agruparCotacao, classificarUnidadesCotacao, extrairRemetenteWhatsApp, parsearCotacao, parsearCotacaoComIA, reconstruirLinhasPdfCotacao } from '@/lib/cardapio/cotacao';
 import type { LinhaCotacao } from '@/lib/cardapio/cotacao';
 import { DADOS, formatarReais, normalizar } from '@/lib/cardapio/motor';
 import { iaEdgeAtivo } from '@/lib/cardapio/ia-cliente';
@@ -175,9 +175,13 @@ export function AbaCotacao({
     setCadastrados((c) => new Set(c).add(idx));
   };
 
+  const classificacaoUnidades = useMemo(() => classificarUnidadesCotacao(soltos), [soltos]);
   const novosComUnidade = soltos.filter((s) => {
     const idx = lido?.indexOf(s) ?? -1;
-    return idx >= 0 && !cadastrados.has(idx) && !!(unidades[idx] ?? s.unid);
+    return idx >= 0
+      && !cadastrados.has(idx)
+      && !!(unidades[idx] ?? s.unid)
+      && classificacaoUnidades.nomesUnidadeUnica.has(normalizar(s.nome));
   });
 
   const assimilarNovosSeguros = () => {
@@ -207,7 +211,16 @@ export function AbaCotacao({
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        paginas.push(content.items.map((it) => ('str' in it ? (it as { str: string }).str : '')).join(' '));
+        const fragmentos = content.items.flatMap((it) => {
+          if (!('str' in it) || !('transform' in it)) return [];
+          const item = it as { str: string; transform: number[] };
+          return [{
+            str: item.str,
+            x: Number(item.transform?.[4] ?? 0),
+            y: Number(item.transform?.[5] ?? 0),
+          }];
+        });
+        paginas.push(reconstruirLinhasPdfCotacao(fragmentos).join('\n'));
       }
       setTexto((prev) => (prev ? prev + '\n' + paginas.join('\n') : paginas.join('\n')));
     } catch {
@@ -371,6 +384,11 @@ export function AbaCotacao({
                   >
                     Assimilar automaticamente {novosComUnidade.length} item{novosComUnidade.length === 1 ? '' : 'ns'} com unidade confirmada
                   </button>
+                )}
+                {classificacaoUnidades.nomesMultiUnidade.size > 0 && (
+                  <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+                    {classificacaoUnidades.nomesMultiUnidade.size} nome(s) aparecem em mais de uma unidade (ex.: CX/UN/KG). O House não escolhe uma unidade arbitrária nem sobrescreve o cadastro.
+                  </p>
                 )}
               </div>
               <ul className="divide-y divide-carvao-100 dark:divide-carvao-700/60">

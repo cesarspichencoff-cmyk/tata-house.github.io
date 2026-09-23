@@ -69,7 +69,7 @@ const RUIDO = new Set([
 const FORNECEDORES_BASE: [RegExp, string][] = [
   [/vita[\s-]*frango/i, 'Vita Frango'],
   [/\bjampac\b/i,       'JAMPAC Alimentos'],
-  [/apetito/i,          'Apetito Foods'],
+  [/apetit+o/i,         'Apetito Foods'],
   [/\bwg\b/i,           'WG'],
   [/frito[\s-]*sul/i,   'Frito Sul'],
   [/\bfld\b/i,          'FLD'],
@@ -321,6 +321,46 @@ function separarMultiItens(linha: string): string[] {
   return linha.replace(re, '$1 $2\n').split('\n');
 }
 
+export interface FragmentoPdfCotacao {
+  str: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Reconstrói linhas visuais do PDF por coordenada Y antes de alimentar o parser.
+ * Evita transformar tabelas de 2–3 colunas em uma única frase contínua.
+ */
+export function reconstruirLinhasPdfCotacao(
+  fragmentos: FragmentoPdfCotacao[],
+  toleranciaY = 2.5,
+): string[] {
+  const validos = fragmentos
+    .filter((f) => f.str?.trim() && Number.isFinite(f.x) && Number.isFinite(f.y))
+    .map((f) => ({ ...f, str: f.str.trim() }))
+    .sort((a, b) => b.y - a.y || a.x - b.x);
+
+  const linhas: Array<{ y: number; itens: FragmentoPdfCotacao[] }> = [];
+  for (const f of validos) {
+    let linha = linhas.find((l) => Math.abs(l.y - f.y) <= toleranciaY);
+    if (!linha) {
+      linha = { y: f.y, itens: [] };
+      linhas.push(linha);
+    }
+    linha.itens.push(f);
+  }
+
+  return linhas
+    .sort((a, b) => b.y - a.y)
+    .map((l) => l.itens
+      .sort((a, b) => a.x - b.x)
+      .map((f) => f.str)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim())
+    .filter(Boolean);
+}
+
 function limparLinha(bruta: string): string {
   return bruta
     .replace(/^\[[^\]]*\]\s*[^:]*:\s*/, '')    // prefixo WhatsApp "[data] C.:"
@@ -398,7 +438,8 @@ function validarLinha(l: LinhaCotacao): LinhaCotacao {
   // só um aviso e o preço era aplicado como se estivesse na unidade certa —
   // caixa cotada virava preço por quilo e inflava o custo em silêncio.
   const keyHist = normItem ?? normNome;
-  const unidEsperada = (UNIDADES_COMPRAS[keyHist] ?? '').toLowerCase();
+  const itemCatalogo = normItem ? DADOS.itens.find((it) => normalizar(it.n) === normItem) : undefined;
+  const unidEsperada = (UNIDADES_COMPRAS[keyHist] ?? itemCatalogo?.u ?? '').toLowerCase();
   let precoFinal = l.preco;
   let bloqueado = false;
 
@@ -502,6 +543,7 @@ function parsearLinhaEstruturada(
 export function parsearCotacao(texto: string, fornecedoresCustom: string[] = []): LinhaCotacao[] {
   const linhas: LinhaCotacao[] = [];
   let fornecedorSecao: string | null = null;
+  let inicioMensagemWhatsapp: number | null = null;
   const fornecedorConhecido = buildLookupFornecedor(fornecedoresCustom);
 
   for (const bruta of texto.split(/\r?\n/)) {
@@ -514,6 +556,23 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
     }
     const linhaLimpa = limparLinha(bruta);
     if (!linhaLimpa || linhaLimpa.length < 2) continue;
+
+    // A equipe frequentemente cola a tabela em uma mensagem e, na mensagem
+    // seguinte, escreve "WG👆🏾", "Jampac👆🏾", "Apetitto👆🏾". Esse marcador é
+    // evidência explícita sobre o bloco imediatamente anterior e vence herança
+    // de fornecedor de mensagens anteriores.
+    if (mWA && /👆|acima/i.test(bruta)) {
+      const retro = fornecedorConhecido(linhaLimpa);
+      if (retro && inicioMensagemWhatsapp !== null) {
+        for (let i = inicioMensagemWhatsapp; i < linhas.length; i += 1) {
+          linhas[i] = { ...linhas[i], marca: retro };
+        }
+        fornecedorSecao = retro;
+        inicioMensagemWhatsapp = linhas.length;
+        continue;
+      }
+    }
+    if (mWA) inicioMensagemWhatsapp = linhas.length;
 
     if (/^(importante|legenda|observa(?:cao|ção)|obs)\s*[:\-]/i.test(linhaLimpa)) continue;
 
@@ -601,11 +660,13 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
     }
 
     const brutoConservacao = normalizar(linhaItem);
-    const conservacao = /\b(rf|resf|resfriado|resfriada)\b/.test(brutoConservacao)
-      ? 'resfriado' as const
-      : /\b(cg|cong|congelado|congelada|congelados)\b/.test(brutoConservacao)
-        ? 'congelado' as const
-        : null;
+    const temResfriado = /\b(rf|resf|resfriado|resfriada)\b/.test(brutoConservacao);
+    const temCongelado = /\b(cg|cong|congelado|congelada|congelados)\b/.test(brutoConservacao);
+    const conservacao = temResfriado === temCongelado
+      ? null
+      : temResfriado
+        ? 'resfriado' as const
+        : 'congelado' as const;
     nome = nome.replace(/\b(RF|CG|RESF|RESFRIAD[OA]|CONG|CONGELAD[OA]S?)\b/gi, '').replace(/\s+/g, ' ').trim();
     const novaLinha: LinhaCotacao = { nome, preco, marca, unid, item: casarItem(nome), conservacao, origem: 'texto' };
     linhas.push(validarLinha(novaLinha));
@@ -757,6 +818,29 @@ export function extrairRemetenteWhatsApp(texto: string): string | null {
 }
 
 /* ----------------- agregação: menor preço por item -------------------- */
+
+export function classificarUnidadesCotacao(linhas: LinhaCotacao[]): {
+  nomesUnidadeUnica: Set<string>;
+  nomesMultiUnidade: Set<string>;
+} {
+  const porNome = new Map<string, { unidades: Set<string>; semUnidade: boolean }>();
+  for (const l of linhas) {
+    const nome = normalizar(l.nome);
+    if (!nome) continue;
+    const atual = porNome.get(nome) ?? { unidades: new Set<string>(), semUnidade: false };
+    if (l.unid) atual.unidades.add(normalizar(l.unid));
+    else atual.semUnidade = true;
+    porNome.set(nome, atual);
+  }
+
+  const nomesUnidadeUnica = new Set<string>();
+  const nomesMultiUnidade = new Set<string>();
+  for (const [nome, info] of porNome) {
+    if (!info.semUnidade && info.unidades.size === 1) nomesUnidadeUnica.add(nome);
+    else if (info.unidades.size > 1) nomesMultiUnidade.add(nome);
+  }
+  return { nomesUnidadeUnica, nomesMultiUnidade };
+}
 
 const unidadeDoItem = new Map<string, string>();
 DADOS.itens.forEach((it) => unidadeDoItem.set(it.n, it.u));

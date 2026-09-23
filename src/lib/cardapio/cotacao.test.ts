@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente, sugerirItemCotacao } from './cotacao';
+import { parsearCotacao, agruparCotacao, classificarUnidadesCotacao, ehRemetenteInterno, bloquearRemetente, reconstruirLinhasPdfCotacao, sugerirItemCotacao } from './cotacao';
 
 describe('cotação — remetente interno (Erika) não é fornecedor', () => {
   it('ehRemetenteInterno reconhece a Erika em várias grafias', () => {
@@ -164,5 +164,76 @@ describe('cotação — assimilação automática conservadora', () => {
   it('não força match quando a evidência lexical é fraca', () => {
     const sugestao = sugerirItemCotacao('Produto promocional código ZXQ');
     expect(sugestao.item).toBeNull();
+  });
+});
+
+
+describe('cotação — formatos reais recebidos em 22/09/2026', () => {
+  it('rótulo de fornecedor enviado depois da mensagem corrige retroativamente o bloco anterior', () => {
+    const texto = [
+      '[22/09/2026, 10:03:00] Tatá Sushi Compras - Érika: Tiras de carnes. R$ 39,98',
+      'Tiras de Frangos R$ 19,98',
+      'Bife R$ 44,98',
+      '[22/09/2026, 10:03:07] Tatá Sushi Compras - Érika: WG👆🏾',
+    ].join('\n');
+    const linhas = parsearCotacao(texto);
+    expect(linhas).toHaveLength(3);
+    expect(linhas.every((l) => l.marca === 'WG')).toBe(true);
+  });
+
+  it('aceita a grafia operacional Apetitto no marcador retroativo', () => {
+    const texto = [
+      '[22/09/2026, 10:01:47] Tatá Sushi Compras - Érika: Acém 30,48',
+      '[22/09/2026, 10:01:57] Tatá Sushi Compras - Érika: Apetitto👆🏾',
+    ].join('\n');
+    const [linha] = parsearCotacao(texto);
+    expect(linha.marca).toBe('Apetito Foods');
+  });
+
+  it('preço declarado para RF e CG não inventa uma conservação única', () => {
+    const [linha] = parsearCotacao('VITA FRANGO\n12,60 Asa RF e CG');
+    expect(linha.marca).toBe('Vita Frango');
+    expect(linha.conservacao).toBeNull();
+  });
+
+  it('unidade canônica do catálogo protege item mesmo sem unidade na tabela histórica de preços', () => {
+    const linhas = parsearCotacao('ALHO CX 298,00\nALHO UN 2,98\nALHO KG 29,80');
+    const item = agruparCotacao(linhas).casados.find((x) => x.item.toLowerCase() === 'alho');
+    expect(item).toBeDefined();
+    expect(item!.bloqueado).toBeFalsy();
+    expect(item!.unid).toBe('kg');
+    expect(item!.preco).toBeCloseTo(29.80, 2);
+  });
+});
+
+describe('cotação — PDF tabular e assimilação em escala', () => {
+  it('reconstrói uma linha visual de três colunas antes de separar os itens', () => {
+    const linha = reconstruirLinhasPdfCotacao([
+      { str: 'POLPA DE SERIGUELA', x: 10, y: 700 },
+      { str: 'KG', x: 110, y: 700.6 },
+      { str: '50,40', x: 135, y: 700.2 },
+      { str: 'ALHO', x: 260, y: 700 },
+      { str: 'CX', x: 330, y: 699.8 },
+      { str: '298,00', x: 360, y: 700.3 },
+      { str: 'OVOS DE GALINHA', x: 500, y: 700 },
+      { str: 'CX', x: 610, y: 700.4 },
+      { str: '281,20', x: 640, y: 700 },
+    ]);
+    expect(linha).toHaveLength(1);
+    const itens = parsearCotacao(linha[0]);
+    expect(itens).toHaveLength(3);
+    expect(itens.map((x) => x.preco)).toEqual([50.4, 298, 281.2]);
+  });
+
+  it('não assimila automaticamente um produto novo quando o PDF oferece várias unidades', () => {
+    const classificacao = classificarUnidadesCotacao([
+      { nome: 'Banana Colorido', preco: 119.2, marca: null, unid: 'cx', item: null },
+      { nome: 'Banana Colorido', preco: 1.49, marca: null, unid: 'un', item: null },
+      { nome: 'Banana Colorido', preco: 7.89, marca: null, unid: 'kg', item: null },
+      { nome: 'Produto X', preco: 10, marca: null, unid: 'kg', item: null },
+    ]);
+    expect(classificacao.nomesMultiUnidade.has('banana colorido')).toBe(true);
+    expect(classificacao.nomesUnidadeUnica.has('banana colorido')).toBe(false);
+    expect(classificacao.nomesUnidadeUnica.has('produto x')).toBe(true);
   });
 });
