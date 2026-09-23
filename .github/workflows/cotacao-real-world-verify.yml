@@ -3,7 +3,7 @@ name: Cotacao Real World Verify
 on:
   push:
     branches:
-      - feat/cotacao-real-world-20260922
+      - feat/cotacao-confluencia-real-20260922
 
 permissions:
   contents: read
