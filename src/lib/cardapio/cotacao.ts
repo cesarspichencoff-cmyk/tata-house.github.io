@@ -70,6 +70,7 @@ const FORNECEDORES_BASE: [RegExp, string][] = [
   [/vita[\s-]*frango/i, 'Vita Frango'],
   [/\bjampac\b/i,       'JAMPAC Alimentos'],
   [/apetit+o/i,         'Apetito Foods'],
+  [/\bsul[\s-]*beef\b/i, 'Sulbeef'],
   [/\bwg\b/i,           'WG'],
   [/frito[\s-]*sul/i,   'Frito Sul'],
   [/\bfld\b/i,          'FLD'],
@@ -157,7 +158,8 @@ function tokens(nome: string): string[] {
 
 const ALIASES: [RegExp, string][] = [
   [/file.*(peito|frango).*(s|sem).*osso|^file (de )?frango/, 'File de frango sem osso'],
-  [/file de peito|peito.*(s\/|sem )sassami|meio file peito|sassami/, 'Peito de Frango sem osso'],
+  [/^sassami$/, 'Filezinho sassami'],
+  [/peito.*(s\/|sem )sassami/, 'Peito de Frango sem osso'],
   [/peito (c\/|com )?osso/, 'Peito de Frango'],
   [/tiras? de carnes?/, 'Tiras de Carne'],
   [/tiras? de frangos?/, 'Tiras de frango'],
@@ -167,19 +169,19 @@ const ALIASES: [RegExp, string][] = [
   [/^acem\b/, 'Acém'],
   [/carne moida/, 'Carne Moída'],
   [/costelinha|costela.*(suina|churrasco|tiras)/, 'Costelinha suína'],
-  [/costela (ripa|janela|minga|inteira|bovina|em cubos)?/, 'Costela Bovina'],
-  [/lombo/, 'Lombo suíno'],
+  [/^costela(?: bovina)?$/, 'Costela Bovina'],
+  [/^lombo(?: suino)?$/, 'Lombo suíno'],
   [/bisteca/, 'Bisteca suína'],
   [/bife a role/, 'Bife a Role'],
-  [/^bife\b/, 'Bife'],
+  [/^bife(?: bovino)?$/, 'Bife'],
   [/linguica toscana|ling toscana/, 'Linguiça Toscana'],
   [/calabresa/, 'Linguiça Calabresa'],
   [/linguica suina|ling suina/, 'Linguiça Fresca'],
   [/frango inteiro|frango (s\/|sem )miudos/, 'Frango inteiro'],
   [/coxa (c\/|com )?(sobrecoxa|sobre coxa)|sobrecoxa|sobre coxa/, 'Sobre coxa'],
-  [/pernil/, 'Pernil de porco fatiado'],
+  [/^pernil(?: suino)?$/, 'Pernil de porco fatiado'],
   [/mussarela/, 'Mussarela'],
-  [/batata (palito|canoa|crinkle|rustica|9mm|surecrisp|frita)/, 'Batata Frita'],
+  [/^batata (?:palito|frita)$/, 'Batata Frita'],
   [/^ovos?( de galinha| vermelhos| extra)?$/, 'Ovos'],
 ];
 
@@ -247,15 +249,21 @@ export function sugerirItemCotacao(
     return { item: extra.n, unid: extra.u || null, confianca: 0.97, motivo: 'tokens' };
   }
 
+  const catalogo = candidatosCatalogo(itensExtras);
+  const consultaNorm = normalizar(nome);
+  const exato = catalogo.find((it) => normalizar(it.n) === consultaNorm);
+  if (exato) {
+    return { item: exato.n, unid: exato.u || null, confianca: 1, motivo: 'exato' };
+  }
+
   for (const [re, alvo] of ALIASES) {
     if (!re.test(n)) continue;
-    const alvoDados = candidatosCatalogo(itensExtras).find((it) => normalizar(it.n) === normalizar(alvo));
+    const alvoDados = catalogo.find((it) => normalizar(it.n) === normalizar(alvo));
     return { item: alvo, unid: alvoDados?.u ?? null, confianca: 1, motivo: 'alias' };
   }
 
-  const consultaNorm = normalizar(nome);
   const consultaTokens = new Set(tokensComparaveis(nome));
-  const avaliados = candidatosCatalogo(itensExtras).map((it) => {
+  const avaliados = catalogo.map((it) => {
     const candidatoNorm = normalizar(it.n);
     if (candidatoNorm === consultaNorm) return { ...it, score: 1 };
 
@@ -544,6 +552,7 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
   const linhas: LinhaCotacao[] = [];
   let fornecedorSecao: string | null = null;
   let inicioMensagemWhatsapp: number | null = null;
+  let fornecedorExplicitoNaMensagem = false;
   const fornecedorConhecido = buildLookupFornecedor(fornecedoresCustom);
 
   for (const bruta of texto.split(/\r?\n/)) {
@@ -564,15 +573,21 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
     if (mWA && /👆|acima/i.test(bruta)) {
       const retro = fornecedorConhecido(linhaLimpa);
       if (retro && inicioMensagemWhatsapp !== null) {
-        for (let i = inicioMensagemWhatsapp; i < linhas.length; i += 1) {
-          linhas[i] = { ...linhas[i], marca: retro };
+        if (!fornecedorExplicitoNaMensagem) {
+          for (let i = inicioMensagemWhatsapp; i < linhas.length; i += 1) {
+            linhas[i] = { ...linhas[i], marca: retro };
+          }
+          fornecedorSecao = retro;
         }
-        fornecedorSecao = retro;
         inicioMensagemWhatsapp = linhas.length;
+        fornecedorExplicitoNaMensagem = false;
         continue;
       }
     }
-    if (mWA) inicioMensagemWhatsapp = linhas.length;
+    if (mWA) {
+      inicioMensagemWhatsapp = linhas.length;
+      fornecedorExplicitoNaMensagem = false;
+    }
 
     if (/^(importante|legenda|observa(?:cao|ção)|obs)\s*[:\-]/i.test(linhaLimpa)) continue;
 
@@ -601,7 +616,10 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
       }
       // Senão, só reconhece fornecedor cadastrado/base — nunca inventa.
       const fk = fornecedorConhecido(linha);
-      if (fk) fornecedorSecao = fk;
+      if (fk) {
+        fornecedorSecao = fk;
+        fornecedorExplicitoNaMensagem = true;
+      }
       continue;
     }
 
