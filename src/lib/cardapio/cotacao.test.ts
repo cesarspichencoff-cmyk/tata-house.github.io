@@ -237,3 +237,28 @@ describe('cotação — PDF tabular e assimilação em escala', () => {
     expect(classificacao.nomesUnidadeUnica.has('produto x')).toBe(true);
   });
 });
+
+
+describe('cotação — confluência de identidade e fornecedor', () => {
+  it('preserva fornecedor explícito do bloco contra rótulo posterior conflitante', () => {
+    const texto = [
+      '[22/09/2026, 10:01:22] Tatá Sushi Compras - Érika: PROMOÇÕES SULBEEF',
+      'Acém Pesado 31,20',
+      '[22/09/2026, 10:01:29] Tatá Sushi Compras - Érika: Jampac👆🏾',
+    ].join('\n');
+    const [linha] = parsearCotacao(texto);
+    expect(linha?.marca).toBe('Sulbeef');
+  });
+
+  it('prefere identidade exata do catálogo antes de alias amplo', () => {
+    expect(sugerirItemCotacao('Filé de Peito').item).toBe('Filé de peito');
+    expect(sugerirItemCotacao('Sassami').item).toBe('Filezinho sassami');
+  });
+
+  it('não funde variantes comerciais distintas em genéricos inseguros', () => {
+    expect(sugerirItemCotacao('Bife Ancho').item).toBeNull();
+    expect(sugerirItemCotacao('Lombinho Bovino').item).toBeNull();
+    expect(sugerirItemCotacao('Costela Janela').item).toBeNull();
+    expect(sugerirItemCotacao('Batata 9mm Surecrisp').item).toBeNull();
+  });
+});
