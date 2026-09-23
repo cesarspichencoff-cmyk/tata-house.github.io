@@ -69,7 +69,7 @@ const RUIDO = new Set([
 const FORNECEDORES_BASE: [RegExp, string][] = [
   [/vita[\s-]*frango/i, 'Vita Frango'],
   [/\bjampac\b/i,       'JAMPAC Alimentos'],
-  [/apetito/i,          'Apetito Foods'],
+  [/apeti+t+o/i,        'Apetito Foods'],
   [/\bwg\b/i,           'WG'],
   [/frito[\s-]*sul/i,   'Frito Sul'],
   [/\bfld\b/i,          'FLD'],
@@ -85,6 +85,18 @@ const FORNECEDORES_BASE: [RegExp, string][] = [
   [/atacad[aã]o/i,      'Atacadão'],
   [/irm[aã]os[\s-]*avelino/i, 'Irmãos Avelino'],
 ];
+
+const UNIDADE_PADRAO_FORNECEDOR = new Map<string, string>([
+  ['Vita Frango', 'kg'],
+  ['JAMPAC Alimentos', 'kg'],
+  ['Apetito Foods', 'kg'],
+  ['WG', 'kg'],
+]);
+
+function unidadePadraoDoFornecedor(nome: string | null | undefined): string | null {
+  if (!nome) return null;
+  return UNIDADE_PADRAO_FORNECEDOR.get(nome) ?? null;
+}
 
 /**
  * Remetentes INTERNOS — pessoas do setor de compras que ENCAMINHAM as
@@ -147,6 +159,7 @@ function paraNumero(s: string): number {
 /** Tokens informativos de um nome (sem acento, sem ruído, sem números). */
 function tokens(nome: string): string[] {
   return normalizar(nome)
+    .replace(/\bs\/coxa\b/g, 'sobrecoxa')
     .replace(/\bs\/(\w)/g, 'sem $1')
     .replace(/\bc\/(\w)/g, 'com $1')
     .split(/[^a-z0-9]+/)
@@ -156,31 +169,34 @@ function tokens(nome: string): string[] {
 /* ---------------- aliases: cotação → item canônico do histórico -------- */
 
 const ALIASES: [RegExp, string][] = [
-  [/file.*(peito|frango).*(s|sem).*osso|^file (de )?frango/, 'File de frango sem osso'],
-  [/file de peito|peito.*(s\/|sem )sassami|meio file peito|sassami/, 'Peito de Frango sem osso'],
-  [/peito (c\/|com )?osso/, 'Peito de Frango'],
-  [/tiras? de carnes?/, 'Tiras de Carne'],
-  [/tiras? de frangos?/, 'Tiras de frango'],
-  [/acem moido|carne moida acem/, 'Acém moído'],
-  [/acem em pecas?/, 'Acem em peça'],
-  [/acem.*(cubos|iscas)/, 'Acem em cubos'],
-  [/^acem\b/, 'Acém'],
-  [/carne moida/, 'Carne Moída'],
-  [/costelinha|costela.*(suina|churrasco|tiras)/, 'Costelinha suína'],
-  [/costela (ripa|janela|minga|inteira|bovina|em cubos)?/, 'Costela Bovina'],
-  [/lombo/, 'Lombo suíno'],
-  [/bisteca/, 'Bisteca suína'],
-  [/bife a role/, 'Bife a Role'],
-  [/^bife\b/, 'Bife'],
-  [/linguica toscana|ling toscana/, 'Linguiça Toscana'],
-  [/calabresa/, 'Linguiça Calabresa'],
-  [/linguica suina|ling suina/, 'Linguiça Fresca'],
-  [/frango inteiro|frango (s\/|sem )miudos/, 'Frango inteiro'],
-  [/coxa (c\/|com )?(sobrecoxa|sobre coxa)|sobrecoxa|sobre coxa/, 'Sobre coxa'],
-  [/pernil/, 'Pernil de porco fatiado'],
-  [/mussarela/, 'Mussarela'],
-  [/batata (palito|canoa|crinkle|rustica|9mm|surecrisp|frita)/, 'Batata Frita'],
-  [/^ovos?( de galinha| vermelhos| extra)?$/, 'Ovos'],
+  [/^file de frango sem osso$/, 'File de frango sem osso'],
+  [/^file de frango$/, 'File de frango sem osso'],
+  [/^file de peito$/, 'Filé de peito'],
+  [/^sassami$/, 'Filezinho sassami'],
+  [/^peito com osso$/, 'Peito de Frango'],
+  [/^tiras? de carnes?$/, 'Tiras de Carne'],
+  [/^tiras? de frangos?$/, 'Tiras de frango'],
+  [/^(acem moido|carne moida acem)$/, 'Acém moído'],
+  [/^acem em pecas?$/, 'Acem em peça'],
+  [/^acem (?:em )?cubos?$/, 'Acém Cubos'],
+  [/^acem$/, 'Acém'],
+  [/^carne moida$/, 'Carne Moída'],
+  [/^costelinha(?: suina)?(?: com osso)?$/, 'Costelinha suína'],
+  [/^costela bovina$/, 'Costela Bovina'],
+  [/^lombo(?: suino)?$/, 'Lombo suíno'],
+  [/^bisteca(?: suina)?$/, 'Bisteca suína'],
+  [/^bife a role$/, 'Bife a Role'],
+  [/^bife$/, 'Bife'],
+  [/^linguica toscana$/, 'Linguiça Toscana'],
+  [/^(linguica tipo calabresa|calabresa)$/, 'Linguiça Calabresa'],
+  [/^linguica suina(?: churrasco)?$/, 'Linguiça Fresca'],
+  [/^(frango inteiro|frango sem miudos)$/, 'Frango inteiro'],
+  [/^(coxa sobrecoxa|coxa com sobrecoxa|coxa e sobrecoxa)$/, 'Coxa e Sobrecoxa'],
+  [/^sobrecoxa$/, 'Sobre coxa'],
+  [/^pernil$/, 'Pernil'],
+  [/^(mussarela|queijo mussarela)$/, 'Mussarela'],
+  [/^batata (?:palito|canoa|crinkle|rustica|7mm|9mm|surecrisp)(?: .*)?$/, 'Batata Frita'],
+  [/^ovos?(?: de galinha| vermelhos| extra)?$/, 'Ovos'],
 ];
 
 export interface SugestaoItemCotacao {
@@ -305,6 +321,51 @@ export function sugerirItemCotacao(
 /** Casa um nome de cotação com um item conhecido (ou null). */
 export function casarItem(nome: string): string | null {
   return sugerirItemCotacao(nome).item;
+}
+
+export interface PdfTextItemLike {
+  str?: string;
+  transform?: ArrayLike<number>;
+}
+
+/**
+ * Reconstrói linhas a partir das coordenadas do PDF.js. O PDF real de hortifruti
+ * tem múltiplas colunas e centenas de itens; juntar tudo com espaço destrói as
+ * fronteiras de linha. Agrupamos por Y e ordenamos por X, preservando cada linha
+ * visual antes de o parser separar os pares PRODUTO / UNIDADE / PREÇO.
+ */
+export function extrairLinhasPdf(items: PdfTextItemLike[]): string[] {
+  const posicionados = items
+    .map((it) => {
+      const str = (it.str ?? '').trim();
+      const t = it.transform ? Array.from(it.transform) : [];
+      return { str, x: Number(t[4]), y: Number(t[5]) };
+    })
+    .filter((it) => it.str);
+
+  if (!posicionados.some((it) => Number.isFinite(it.x) && Number.isFinite(it.y))) {
+    const linha = posicionados.map((it) => it.str).join(' ').replace(/\s+/g, ' ').trim();
+    return linha ? [linha] : [];
+  }
+
+  const ordenados = posicionados
+    .filter((it) => Number.isFinite(it.x) && Number.isFinite(it.y))
+    .sort((a, b) => (Math.abs(b.y - a.y) > 1.5 ? b.y - a.y : a.x - b.x));
+
+  const grupos: { y: number; itens: typeof ordenados }[] = [];
+  for (const item of ordenados) {
+    const ultimo = grupos[grupos.length - 1];
+    if (!ultimo || Math.abs(ultimo.y - item.y) > 1.5) {
+      grupos.push({ y: item.y, itens: [item] });
+    } else {
+      ultimo.itens.push(item);
+      ultimo.y = (ultimo.y * (ultimo.itens.length - 1) + item.y) / ultimo.itens.length;
+    }
+  }
+
+  return grupos
+    .map((g) => g.itens.sort((a, b) => a.x - b.x).map((it) => it.str).join(' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
 }
 
 /* --------------------------- parser de texto -------------------------- */
@@ -499,12 +560,89 @@ function parsearLinhaEstruturada(
   return validarLinha({ nome: produto, preco, marca, unid, item: casarItem(produto), conservacao, origem: 'estruturado' });
 }
 
+type BlocoWhatsApp = {
+  linhas: string[];
+  temPreco: boolean;
+  fornecedorExplicito: string | null;
+  marcadorFornecedor: string | null;
+};
+
+function prepararBlocosWhatsApp(
+  texto: string,
+  fornecedorConhecido: (s: string) => string | null,
+): string {
+  const brutas = texto.split(/\r?\n/);
+  if (!brutas.some((l) => /^\[[^\]]+\]\s*[^:\n]{1,80}:/.test(l))) return texto;
+
+  const blocos: { linhas: string[] }[] = [];
+  let atual: { linhas: string[] } | null = null;
+
+  for (const bruta of brutas) {
+    const m = bruta.match(/^\[[^\]]+\]\s*[^:\n]{1,80}:\s*(.*)$/);
+    if (m) {
+      if (atual) blocos.push(atual);
+      atual = { linhas: [m[1] ?? ''] };
+    } else if (atual) {
+      atual.linhas.push(bruta);
+    } else {
+      // Texto anterior ao primeiro carimbo continua sendo parseável.
+      blocos.push({ linhas: [bruta] });
+    }
+  }
+  if (atual) blocos.push(atual);
+
+  const info: BlocoWhatsApp[] = blocos.map((b) => {
+    const limpas = b.linhas.map(limparLinha).filter(Boolean);
+    const temPreco = limpas.some((l) => RE_TEM_PRECO.test(l));
+    const fornecedores = limpas.map((l) => fornecedorConhecido(l)).filter((x): x is string => !!x);
+    const fornecedorExplicito = fornecedores[0] ?? null;
+    const textoCurto = limparLinha(limpas.join(' '));
+    const marcadorFornecedor = !temPreco && textoCurto.length <= 60
+      ? fornecedorConhecido(textoCurto)
+      : null;
+    return { linhas: b.linhas, temPreco, fornecedorExplicito, marcadorFornecedor };
+  });
+
+  // Propaga o fornecedor explícito para mensagens seguintes do mesmo bloco de encaminhamento.
+  const atribuido: (string | null)[] = info.map((x) => x.fornecedorExplicito);
+  let corrente: string | null = null;
+  for (let i = 0; i < info.length; i += 1) {
+    if (info[i].marcadorFornecedor) continue;
+    if (info[i].fornecedorExplicito) corrente = info[i].fornecedorExplicito;
+    if (info[i].temPreco && !atribuido[i] && corrente) atribuido[i] = corrente;
+  }
+
+  // Mensagens curtas "WG👆🏾", "Jampac👆🏾" etc. rotulam retroativamente o
+  // conjunto imediatamente anterior. Isso evita que o fornecedor anterior
+  // vaze para uma tabela encaminhada sem cabeçalho próprio.
+  for (let i = 0; i < info.length; i += 1) {
+    const marcador = info[i].marcadorFornecedor;
+    if (!marcador) continue;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (info[j].marcadorFornecedor) break;
+      const explicito = info[j].fornecedorExplicito;
+      if (explicito && explicito !== marcador) break;
+      if (info[j].temPreco) atribuido[j] = marcador;
+      if (explicito === marcador) break;
+    }
+  }
+
+  const saida: string[] = [];
+  info.forEach((b, i) => {
+    if (b.marcadorFornecedor) return;
+    if (b.temPreco && atribuido[i]) saida.push(`Fornecedor: ${atribuido[i]}`);
+    saida.push(...b.linhas);
+  });
+  return saida.join('\n');
+}
+
 export function parsearCotacao(texto: string, fornecedoresCustom: string[] = []): LinhaCotacao[] {
   const linhas: LinhaCotacao[] = [];
   let fornecedorSecao: string | null = null;
   const fornecedorConhecido = buildLookupFornecedor(fornecedoresCustom);
+  const textoPreparado = prepararBlocosWhatsApp(texto, fornecedorConhecido);
 
-  for (const bruta of texto.split(/\r?\n/)) {
+  for (const bruta of textoPreparado.split(/\r?\n/)) {
     // Extrai remetente do prefixo WA "[data] Remetente:" ANTES de limpar
     const mWA = bruta.match(/^\[[^\]]*\]\s*([^:\n]{1,60}):/);
     const temPrefitoWA = !!mWA;
@@ -598,6 +736,9 @@ export function parsearCotacao(texto: string, fornecedoresCustom: string[] = [])
     // se não veio marca inline, herda o fornecedor do cabeçalho de seção
     if (!marca && fornecedorSecao) {
       marca = fornecedorSecao;
+    }
+    if (!unid && marca) {
+      unid = unidadePadraoDoFornecedor(marca);
     }
 
     const brutoConservacao = normalizar(linhaItem);

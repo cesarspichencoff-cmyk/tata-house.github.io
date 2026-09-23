@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente, sugerirItemCotacao } from './cotacao';
+import { parsearCotacao, agruparCotacao, ehRemetenteInterno, bloquearRemetente, sugerirItemCotacao, extrairLinhasPdf } from './cotacao';
 
 describe('cotação — remetente interno (Erika) não é fornecedor', () => {
   it('ehRemetenteInterno reconhece a Erika em várias grafias', () => {
@@ -164,5 +164,99 @@ describe('cotação — assimilação automática conservadora', () => {
   it('não força match quando a evidência lexical é fraca', () => {
     const sugestao = sugerirItemCotacao('Produto promocional código ZXQ');
     expect(sugestao.item).toBeNull();
+  });
+});
+
+
+describe('cotação — corpus real de fornecedores set/2026', () => {
+  it('não colapsa cortes específicos em Bife ou Costela genéricos', () => {
+    expect(sugerirItemCotacao('Bife Ancho').item).not.toBe('Bife');
+    expect(sugerirItemCotacao('Bife do Vazio').item).not.toBe('Bife');
+    expect(sugerirItemCotacao('Costela Janela').item).not.toBe('Costela Bovina');
+    expect(sugerirItemCotacao('Costela Minga').item).not.toBe('Costela Bovina');
+  });
+
+  it('reconhece Sassami e Coxa/Sobrecoxa como produtos específicos', () => {
+    expect(sugerirItemCotacao('Sassami').item).toBe('Filezinho sassami');
+    expect(sugerirItemCotacao('Coxa S/Coxa').item).toBe('Coxa e Sobrecoxa');
+  });
+
+  it('usa o marcador posterior WG para rotular a tabela encaminhada anterior', () => {
+    const texto = [
+      '[22/09/2026, 10:03:00] Tatá Sushi Compras - Érika: Tiras de carnes. R$ 39,98',
+      'Tiras de Frangos R$ 19,98',
+      'Bife R$ 44,98',
+      '[22/09/2026, 10:03:07] Tatá Sushi Compras - Érika: WG👆🏾',
+    ].join('\n');
+    const linhas = parsearCotacao(texto);
+    expect(linhas).toHaveLength(3);
+    expect(linhas.every((l) => l.marca === 'WG')).toBe(true);
+    expect(linhas.every((l) => l.unid === 'kg')).toBe(true);
+  });
+
+  it('mantém Jampac em mensagens consecutivas até o marcador posterior', () => {
+    const texto = [
+      '[22/09/2026, 10:01:21] Tatá Sushi Compras - Érika: BOVINOS JAMPAC ALIMENTOS',
+      'Acém Cong - Quality Beef 31,90',
+      '[22/09/2026, 10:01:22] Tatá Sushi Compras - Érika: SUÍNOS',
+      'Barriga - Seara 15,99',
+      '[22/09/2026, 10:01:22] Tatá Sushi Compras - Érika: BACON',
+      'Bacon em Manta - Dália 23,90',
+      '[22/09/2026, 10:01:29] Tatá Sushi Compras - Érika: Jampac👆🏾',
+    ].join('\n');
+    const linhas = parsearCotacao(texto);
+    expect(linhas).toHaveLength(3);
+    expect(linhas.every((l) => l.marca === 'JAMPAC Alimentos')).toBe(true);
+    expect(linhas.every((l) => l.unid === 'kg')).toBe(true);
+  });
+
+  it('tolera a grafia Apetitto e não perde o fornecedor', () => {
+    const texto = [
+      '[22/09/2026, 10:01:47] Tatá Sushi Compras - Érika: TABELA APETITO FOODS 22/09/2026',
+      'Acém Cubos/Iscas 34,48',
+      'Filé de Tilápia 35,48',
+      '[22/09/2026, 10:01:57] Tatá Sushi Compras - Érika: Apetitto👆🏾',
+    ].join('\n');
+    const linhas = parsearCotacao(texto);
+    expect(linhas).toHaveLength(2);
+    expect(linhas.every((l) => l.marca === 'Apetito Foods')).toBe(true);
+    expect(linhas.every((l) => l.unid === 'kg')).toBe(true);
+  });
+});
+
+describe('cotação — PDF tabular real preserva linhas e unidades', () => {
+  it('reconstrói uma linha visual com várias colunas pela posição X/Y', () => {
+    const linhas = extrairLinhasPdf([
+      { str: 'ALHO', transform: [1, 0, 0, 1, 100, 700] },
+      { str: 'CX', transform: [1, 0, 0, 1, 180, 700] },
+      { str: '298,00', transform: [1, 0, 0, 1, 210, 700] },
+      { str: 'BANANA', transform: [1, 0, 0, 1, 320, 700] },
+      { str: 'UN', transform: [1, 0, 0, 1, 410, 700] },
+      { str: '1,49', transform: [1, 0, 0, 1, 440, 700] },
+      { str: 'OVOS DE GALINHA', transform: [1, 0, 0, 1, 520, 700] },
+      { str: 'BD', transform: [1, 0, 0, 1, 650, 700] },
+      { str: '28,12', transform: [1, 0, 0, 1, 680, 700] },
+    ]);
+    expect(linhas).toHaveLength(1);
+    const parsed = parsearCotacao(linhas.join('\n'));
+    expect(parsed).toHaveLength(3);
+    expect(parsed.map((l) => l.preco)).toEqual([298, 1.49, 28.12]);
+  });
+
+  it('quando o PDF traz CX/UN/KG do mesmo item, só o KG pode virar preço por kg', () => {
+    const linhas = parsearCotacao('ALHO CX 298,00 ALHO UN 2,98 ALHO KG 29,80');
+    expect(linhas).toHaveLength(3);
+    const agrupado = agruparCotacao(linhas);
+    const alho = agrupado.casados.find((x) => x.item.toLowerCase().includes('alho'));
+    expect(alho).toBeDefined();
+    expect(alho!.bloqueado).toBeFalsy();
+    expect(alho!.preco).toBeCloseTo(29.80, 2);
+  });
+
+  it('preserva produto/unidade/preço em linhas típicas de frutas e legumes', () => {
+    const linhas = parsearCotacao('ABACAXI UN 13,32 ABACAXI KG 7,40 CENOURA KG 7,03 TOMATE CEREJA BD 9,25');
+    expect(linhas).toHaveLength(4);
+    expect(linhas.map((l) => l.unid)).toEqual(['un', 'kg', 'kg', 'bd']);
+    expect(linhas.map((l) => l.preco)).toEqual([13.32, 7.4, 7.03, 9.25]);
   });
 });

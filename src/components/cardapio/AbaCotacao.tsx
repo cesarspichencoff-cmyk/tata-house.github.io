@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Botao, Cartao } from '@/components/ui';
-import { agruparCotacao, extrairRemetenteWhatsApp, parsearCotacao, parsearCotacaoComIA } from '@/lib/cardapio/cotacao';
+import { agruparCotacao, extrairLinhasPdf, extrairRemetenteWhatsApp, parsearCotacao, parsearCotacaoComIA } from '@/lib/cardapio/cotacao';
 import type { LinhaCotacao } from '@/lib/cardapio/cotacao';
 import { DADOS, formatarReais, normalizar } from '@/lib/cardapio/motor';
 import { iaEdgeAtivo } from '@/lib/cardapio/ia-cliente';
@@ -207,7 +207,11 @@ export function AbaCotacao({
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        paginas.push(content.items.map((it) => ('str' in it ? (it as { str: string }).str : '')).join(' '));
+        const linhasPagina = extrairLinhasPdf(content.items.map((it) => ({
+          str: 'str' in it ? (it as { str: string }).str : '',
+          transform: 'transform' in it ? (it as { transform: ArrayLike<number> }).transform : undefined,
+        })));
+        paginas.push(linhasPagina.join('\n'));
       }
       setTexto((prev) => (prev ? prev + '\n' + paginas.join('\n') : paginas.join('\n')));
     } catch {
