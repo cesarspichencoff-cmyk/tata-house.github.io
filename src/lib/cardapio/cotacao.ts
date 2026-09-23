@@ -69,7 +69,8 @@ const RUIDO = new Set([
 const FORNECEDORES_BASE: [RegExp, string][] = [
   [/vita[\s-]*frango/i, 'Vita Frango'],
   [/\bjampac\b/i,       'JAMPAC Alimentos'],
-  [/apetito/i,          'Apetito Foods'],
+  [/apeti+t+o/i,        'Apetito Foods'],
+  [/\bsul[\s-]*beef\b/i, 'Sulbeef'],
   [/\bwg\b/i,           'WG'],
   [/frito[\s-]*sul/i,   'Frito Sul'],
   [/\bfld\b/i,          'FLD'],
@@ -157,7 +158,8 @@ function tokens(nome: string): string[] {
 
 const ALIASES: [RegExp, string][] = [
   [/file.*(peito|frango).*(s|sem).*osso|^file (de )?frango/, 'File de frango sem osso'],
-  [/file de peito|peito.*(s\/|sem )sassami|meio file peito|sassami/, 'Peito de Frango sem osso'],
+  [/^sassami$/, 'Filezinho sassami'],
+  [/peito.*(s\/|sem )sassami/, 'Peito de Frango sem osso'],
   [/peito (c\/|com )?osso/, 'Peito de Frango'],
   [/tiras? de carnes?/, 'Tiras de Carne'],
   [/tiras? de frangos?/, 'Tiras de frango'],
@@ -167,19 +169,19 @@ const ALIASES: [RegExp, string][] = [
   [/^acem\b/, 'Acém'],
   [/carne moida/, 'Carne Moída'],
   [/costelinha|costela.*(suina|churrasco|tiras)/, 'Costelinha suína'],
-  [/costela (ripa|janela|minga|inteira|bovina|em cubos)?/, 'Costela Bovina'],
-  [/lombo/, 'Lombo suíno'],
+  [/^costela(?: bovina)?$/, 'Costela Bovina'],
+  [/^lombo(?: suino)?$/, 'Lombo suíno'],
   [/bisteca/, 'Bisteca suína'],
   [/bife a role/, 'Bife a Role'],
-  [/^bife\b/, 'Bife'],
+  [/^bife(?: bovino)?$/, 'Bife'],
   [/linguica toscana|ling toscana/, 'Linguiça Toscana'],
   [/calabresa/, 'Linguiça Calabresa'],
   [/linguica suina|ling suina/, 'Linguiça Fresca'],
   [/frango inteiro|frango (s\/|sem )miudos/, 'Frango inteiro'],
   [/coxa (c\/|com )?(sobrecoxa|sobre coxa)|sobrecoxa|sobre coxa/, 'Sobre coxa'],
-  [/pernil/, 'Pernil de porco fatiado'],
+  [/^pernil(?: suino)?$/, 'Pernil de porco fatiado'],
   [/mussarela/, 'Mussarela'],
-  [/batata (palito|canoa|crinkle|rustica|9mm|surecrisp|frita)/, 'Batata Frita'],
+  [/^batata (?:palito|frita)$/, 'Batata Frita'],
   [/^ovos?( de galinha| vermelhos| extra)?$/, 'Ovos'],
 ];
 
@@ -247,15 +249,21 @@ export function sugerirItemCotacao(
     return { item: extra.n, unid: extra.u || null, confianca: 0.97, motivo: 'tokens' };
   }
 
+  const catalogo = candidatosCatalogo(itensExtras);
+  const consultaNorm = normalizar(nome);
+  const exato = catalogo.find((it) => normalizar(it.n) === consultaNorm);
+  if (exato) {
+    return { item: exato.n, unid: exato.u || null, confianca: 1, motivo: 'exato' };
+  }
+
   for (const [re, alvo] of ALIASES) {
     if (!re.test(n)) continue;
-    const alvoDados = candidatosCatalogo(itensExtras).find((it) => normalizar(it.n) === normalizar(alvo));
+    const alvoDados = catalogo.find((it) => normalizar(it.n) === normalizar(alvo));
     return { item: alvo, unid: alvoDados?.u ?? null, confianca: 1, motivo: 'alias' };
   }
 
-  const consultaNorm = normalizar(nome);
   const consultaTokens = new Set(tokensComparaveis(nome));
-  const avaliados = candidatosCatalogo(itensExtras).map((it) => {
+  const avaliados = catalogo.map((it) => {
     const candidatoNorm = normalizar(it.n);
     if (candidatoNorm === consultaNorm) return { ...it, score: 1 };
 
@@ -499,12 +507,65 @@ function parsearLinhaEstruturada(
   return validarLinha({ nome: produto, preco, marca, unid, item: casarItem(produto), conservacao, origem: 'estruturado' });
 }
 
+/**
+ * Algumas mensagens reais chegam com o nome do fornecedor DEPOIS da tabela,
+ * por exemplo uma mensagem com preços seguida de "WG 👆🏾".
+ * A seta para cima é evidência explícita de que o rótulo vale para a mensagem
+ * anterior. Fazemos a correção antes do parser normal, sem adivinhar nomes.
+ */
+function aplicarFornecedorPosteriorWhatsApp(
+  texto: string,
+  fornecedorConhecido: (s: string) => string | null,
+): string {
+  const linhas = texto.split(/\r?\n/);
+  const blocos: { linhas: string[]; fornecedorInjetado?: string; consumir?: boolean }[] = [];
+  let atual: { linhas: string[]; fornecedorInjetado?: string; consumir?: boolean } | null = null;
+
+  for (const linha of linhas) {
+    if (/^\[[^\]]+\]\s*[^:\n]{1,60}:/.test(linha)) {
+      atual = { linhas: [linha] };
+      blocos.push(atual);
+    } else if (atual) {
+      atual.linhas.push(linha);
+    } else {
+      atual = { linhas: [linha] };
+      blocos.push(atual);
+    }
+  }
+
+  for (let i = 1; i < blocos.length; i += 1) {
+    const bloco = blocos[i];
+    const bruto = bloco.linhas.join(' ');
+    if (!/👆/u.test(bruto) || RE_TEM_PRECO.test(bruto)) continue;
+
+    const limpas = bloco.linhas.map(limparLinha).filter(Boolean);
+    const etiqueta = fornecedorConhecido(limpas.join(' '));
+    if (!etiqueta) continue;
+
+    const anterior = blocos[i - 1];
+    const linhasAnteriores = anterior.linhas.map(limparLinha).filter(Boolean);
+    if (!linhasAnteriores.some((l) => RE_TEM_PRECO.test(l))) continue;
+
+    // Se o próprio bloco anterior já nomeia um fornecedor conhecido,
+    // ele é mais forte que a anotação posterior.
+    const explicito = linhasAnteriores.some((l) => !RE_TEM_PRECO.test(l) && !!fornecedorConhecido(l));
+    if (!explicito) anterior.fornecedorInjetado = etiqueta;
+    bloco.consumir = true;
+  }
+
+  return blocos
+    .flatMap((b) => b.consumir ? [] : [b.fornecedorInjetado ? `Fornecedor: ${b.fornecedorInjetado}` : '', ...b.linhas])
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function parsearCotacao(texto: string, fornecedoresCustom: string[] = []): LinhaCotacao[] {
   const linhas: LinhaCotacao[] = [];
   let fornecedorSecao: string | null = null;
   const fornecedorConhecido = buildLookupFornecedor(fornecedoresCustom);
+  const textoPreparado = aplicarFornecedorPosteriorWhatsApp(texto, fornecedorConhecido);
 
-  for (const bruta of texto.split(/\r?\n/)) {
+  for (const bruta of textoPreparado.split(/\r?\n/)) {
     // Extrai remetente do prefixo WA "[data] Remetente:" ANTES de limpar
     const mWA = bruta.match(/^\[[^\]]*\]\s*([^:\n]{1,60}):/);
     const temPrefitoWA = !!mWA;
