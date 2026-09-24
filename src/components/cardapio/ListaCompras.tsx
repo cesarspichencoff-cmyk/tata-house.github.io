@@ -14,6 +14,7 @@
 import { useMemo, useState } from 'react';
 import { Botao, Cartao, Modal, Pilula, estiloInput } from '@/components/ui';
 import { Icone } from '@/components/Icones';
+import { CampoQuantidadeCompra } from './CampoQuantidadeCompra';
 import { DADOS, DIAS_SEMANA, formatarQtd, formatarReais, ingredienteBase, normalizar } from '@/lib/cardapio/motor';
 import { linhasDoDiaComAprendizado } from '@/lib/cardapio/aprendizado-compras';
 import { resolverPreco } from '@/lib/cardapio/precos';
@@ -252,15 +253,13 @@ export function ListaCompras({
                             {l.manual && <span className="ml-1 text-micro font-bold uppercase text-ouro-600">extra</span>}
                             {l.fonte === 'aprendido_app' && <span className="ml-1 text-[9px] font-bold uppercase tracking-wide text-brand-600">aprendido</span>}
                           </span>
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.1"
-                            value={l.qtd}
-                            onChange={(e) =>
+                          <CampoQuantidadeCompra
+                            valor={l.qtd}
+                            ariaLabel={`Quantidade de ${l.item}`}
+                            aoConfirmar={(qtd) =>
                               l.manual
-                                ? onEditManual?.(di, Number(l.chave.split(':')[1]), { qtd: Number(e.target.value) })
-                                : onAjuste!(di, l.chave, Number(e.target.value))
+                                ? onEditManual?.(di, Number(l.chave.split(':')[1]), { qtd })
+                                : onAjuste!(di, l.chave, qtd)
                             }
                             className="h-9 w-16 rounded-lg border border-carvao-200 bg-white px-1.5 text-center font-bold tabular-nums dark:border-carvao-600 dark:bg-carvao-900"
                           />
