@@ -388,7 +388,8 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
     for (const [tipo, campo] of TIPOS) {
       const opcao = dia[campo];
       if (!opcao || typeof opcao !== 'string') continue;
-      const itens = porTipoOpcao.get(`${tipo}|${normalizar(opcao)}`);
+      const opcaoBase = campo === 'sobremesa' ? opcao.split(/\s*\+\s*/)[0] : opcao;
+      const itens = porTipoOpcao.get(`${tipo}|${normalizar(opcaoBase)}`);
       if (itens && itens.length > 0) {
         itens.forEach(({ i, q, u }) => adiciona(i, q, u, 'operacional_mapa'));
         algumMapa = true;
@@ -401,7 +402,8 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
     for (const [, campo] of TIPOS) {
       const opcao = dia[campo];
       if (!opcao || typeof opcao !== 'string') continue;
-      const receita = receitaDoPrato(opcao);
+      const opcaoBase = campo === 'sobremesa' ? opcao.split(/\s*\+\s*/)[0] : opcao;
+      const receita = receitaDoPrato(opcaoBase);
       if (receita) {
         receita.ingredientes.forEach((ing) => {
           const k = normalizar(ing.item);
@@ -450,6 +452,10 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
       return;
     }
     for (const parte of texto.split(/\s+com\s+|\s+e\s+|,|\+|·|\//i)) {
+      if (categoria === 'sobremesa' && normalizar(parte) === 'fruta') {
+        adiciona('Fruta da semana', 0.12 * DADOS.baseline, 'kg', 'fallback');
+        continue;
+      }
       const it = itemDoTexto(parte);
       if (!it) continue;
       const k = normalizar(it.n);

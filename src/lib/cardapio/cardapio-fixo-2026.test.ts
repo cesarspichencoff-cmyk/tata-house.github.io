@@ -21,7 +21,7 @@ describe('cardápio fixo out-dez/2026', () => {
 
     expect(s53?.slice(0, 4).every(Boolean)).toBe(true);
     expect(s53?.slice(0, 4).map((d) => d?.sobremesa)).toEqual([
-      'Fruta', 'Fruta', 'Pudim de baunilha', 'Gelatina colorida',
+      'Fruta', 'Fruta', 'Pudim de baunilha + Fruta', 'Gelatina colorida + Fruta',
     ]);
     expect(s53?.slice(4)).toEqual([null, null, null]);
     expect(semanaUsaBagLeiteCondensado('2026-S53')).toBe(false);
@@ -143,11 +143,35 @@ describe('cardápio fixo out-dez/2026', () => {
     expect(referencia.valor).toBeGreaterThan(0);
   });
 
-  it('gera fruta genérica para Compras escolher a promoção da semana', () => {
-    const diaFruta = comPessoas(cardapioFixoParaSemana('2026-S41')!)[1];
-    const fruta = listaDoDia(diaFruta).find((i) => i.item === 'Fruta da semana');
-    expect(fruta?.unid).toBe('kg');
-    expect(fruta?.qtd).toBeGreaterThan(0);
+  it('oferece fruta todos os dias sem duplicar os dias que já são de fruta', () => {
+    for (let semana = 41; semana <= 44; semana++) {
+      const dias = comPessoas(cardapioFixoParaSemana(`2026-S${semana}`)!);
+      for (const dia of dias) {
+        expect(dia.sobremesa.toLowerCase()).toContain('fruta');
+        const frutasGenericas = listaDoDia(dia).filter((i) => i.item === 'Fruta da semana');
+        if (dia.sobremesa === 'Salada de frutas') {
+          expect(frutasGenericas).toHaveLength(0);
+        } else {
+          expect(frutasGenericas).toHaveLength(1);
+          expect(frutasGenericas[0].unid).toBe('kg');
+          expect(frutasGenericas[0].qtd).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('adiciona fruta sem perder a receita-base da sobremesa', () => {
+    const fixo = cardapioFixoParaSemana('2026-S53')![2]!;
+    const comComplemento = { pessoas: PESSOAS_PADRAO[2], ...fixo };
+    const semComplemento = { ...comComplemento, sobremesa: 'Pudim de baunilha' };
+
+    const semFruta = listaDoDia(semComplemento);
+    const comFruta = listaDoDia(comComplemento);
+    const somenteBase = (itens: ReturnType<typeof listaDoDia>) =>
+      itens.filter((i) => i.item !== 'Fruta da semana');
+
+    expect(somenteBase(comFruta)).toEqual(somenteBase(semFruta));
+    expect(comFruta.some((i) => i.item === 'Fruta da semana')).toBe(true);
   });
 
   it('concentra uma bag de até 5 L só nas semanas 1 e 3, sem abrir bag no fechamento', () => {
