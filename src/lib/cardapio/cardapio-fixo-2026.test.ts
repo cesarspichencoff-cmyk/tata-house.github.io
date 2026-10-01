@@ -150,18 +150,23 @@ describe('cardápio fixo out-dez/2026', () => {
     expect(fruta?.qtd).toBeGreaterThan(0);
   });
 
-  it('concentra aproximadamente 5 L de leite condensado só nas semanas 1 e 3', () => {
+  it('concentra uma bag de até 5 L só nas semanas 1 e 3, sem abrir bag no fechamento', () => {
     const litrosDaSemana = (id: string) =>
       comPessoas(cardapioFixoParaSemana(id)!)
         .flatMap((d) => listaDoDia(d))
         .filter((i) => i.item === 'Leite condensado' && i.unid === 'lt')
         .reduce((s, i) => s + i.qtd, 0);
 
-    expect(litrosDaSemana('2026-S41')).toBeCloseTo(5, 1);
-    expect(litrosDaSemana('2026-S43')).toBeCloseTo(5, 1);
+    for (const id of ['2026-S41', '2026-S43']) {
+      const litros = litrosDaSemana(id);
+      expect(litros).toBeGreaterThan(4.9);
+      expect(litros).toBeLessThanOrEqual(5);
+    }
     expect(litrosDaSemana('2026-S42')).toBe(0);
     expect(litrosDaSemana('2026-S44')).toBe(0);
+    expect(litrosDaSemana('2026-S53')).toBe(0);
     expect(semanaUsaBagLeiteCondensado('2026-S41')).toBe(true);
     expect(semanaUsaBagLeiteCondensado('2026-S42')).toBe(false);
+    expect(semanaUsaBagLeiteCondensado('2026-S53')).toBe(false);
   });
 });
