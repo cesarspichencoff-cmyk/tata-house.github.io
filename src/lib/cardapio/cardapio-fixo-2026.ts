@@ -4,6 +4,15 @@ type DiaFixo = Omit<DiaCardapio, 'pessoas'>;
 
 const BASE = 'Arroz e Feijão';
 
+const normalizarLocal = (texto: string) =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+const comFruta = (sobremesa: string): string => {
+  const norm = normalizarLocal(sobremesa);
+  if (norm === 'fruta' || norm === 'salada de frutas') return sobremesa;
+  return `${sobremesa} + Fruta`;
+};
+
 const dia = (
   principal: string,
   guarnicao: string,
@@ -14,7 +23,7 @@ const dia = (
   guarnicaoFixa: BASE,
   guarnicao,
   salada,
-  sobremesa,
+  sobremesa: comFruta(sobremesa),
 });
 
 const CICLO: DiaFixo[][] = [
@@ -59,8 +68,8 @@ const CICLO: DiaFixo[][] = [
 const FINAL_2026: DiaFixo[] = [
   { ...CICLO[0][0], sobremesa: 'Fruta' },
   { ...CICLO[0][1], sobremesa: 'Fruta' },
-  { ...CICLO[0][2], sobremesa: 'Pudim de baunilha' },
-  { ...CICLO[0][3], sobremesa: 'Gelatina colorida' },
+  { ...CICLO[0][2], sobremesa: comFruta('Pudim de baunilha') },
+  { ...CICLO[0][3], sobremesa: comFruta('Gelatina colorida') },
 ];
 
 const LC_LITROS_POR_PESSOA: Record<string, number> = {
@@ -71,11 +80,9 @@ const LC_LITROS_POR_PESSOA: Record<string, number> = {
   'mousse de morango': 0.0215,
 };
 
-const normalizarLocal = (texto: string) =>
-  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-
 export function litrosLeiteCondensadoPorPessoa(sobremesa: string): number {
-  return LC_LITROS_POR_PESSOA[normalizarLocal(sobremesa)] ?? 0;
+  const base = normalizarLocal(sobremesa).split(/\s*\+\s*/)[0];
+  return LC_LITROS_POR_PESSOA[base] ?? 0;
 }
 
 function numeroSemana(id: string): number | null {
