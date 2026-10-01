@@ -255,6 +255,21 @@ export function AbaPedido({
         else acc.set(l.chave, { chave: l.chave, item: l.item, unid: l.unid, qtd: l.qtd });
       });
     });
+
+    // A operação compra leite condensado em bag de 5 L. A cozinha continua
+    // vendo o consumo diário em litros, mas o pedido semanal compra embalagem inteira.
+    const leite = acc.get('leite condensado');
+    if (leite && leite.unid === 'lt' && leite.qtd > 0) {
+      acc.delete('leite condensado');
+      const chaveBag = 'leite condensado bag 5 l';
+      acc.set(chaveBag, {
+        chave: chaveBag,
+        item: 'Leite condensado · bag 5 L',
+        unid: 'bag',
+        qtd: Math.ceil(leite.qtd / 5),
+      });
+    }
+
     return acc;
   }, [estado, fatores, mostrarBasicos]);
 

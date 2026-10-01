@@ -4,52 +4,79 @@ type DiaFixo = Omit<DiaCardapio, 'pessoas'>;
 
 const BASE = 'Arroz e Feijão';
 
-const dia = (principal: string, guarnicao: string, salada: string): DiaFixo => ({
+const dia = (
+  principal: string,
+  guarnicao: string,
+  salada: string,
+  sobremesa: string,
+): DiaFixo => ({
   principal,
   guarnicaoFixa: BASE,
   guarnicao,
   salada,
-  sobremesa: '',
+  sobremesa,
 });
 
 const CICLO: DiaFixo[][] = [
   [
-    dia('Cubos de frango no molho', 'Purê de batata', 'Alface / tomate'),
-    dia('Acém ao molho de cebola', 'Abóbora refogada', 'Cenoura / Beterraba ralada'),
-    dia('Bisteca Suína', 'Farofa de Cenoura', 'Repolho c/ alface'),
-    dia('Strogonoff de frango', 'Batata palha', 'Alface / cenoura'),
-    dia('Filé de peixe c/ crosta de ervas', 'Mandioca cozida', 'Mix de folhas c/ milho'),
-    dia('Carne moída', 'Macarrão', 'Alface / tomate / Pepino'),
-    dia('Coxa e sobrecoxa assada', 'Farofa simples', 'Repolho c/ manga'),
+    dia('Carne de panela com batatas', 'Abóbora refogada', 'Alface e tomate', 'Arroz-doce'),
+    dia('Lombo suíno', 'Mandioca cozida', 'Alface, tomate e pepino', 'Fruta'),
+    dia('Filé de frango à pizzaiolo', 'Creme de milho', 'Beterraba cozida', 'Mousse de maracujá'),
+    dia('Acém ao molho de cebola', 'Abóbora refogada', 'Repolho com alface', 'Gelatina cremosa'),
+    dia('Cubos de frango no molho', 'Purê de abóbora', 'Cenoura e beterraba ralada', 'Fruta'),
+    dia('Filé de peixe com crosta de ervas', 'Purê de batata', 'Mix de folhas', 'Fruta'),
+    dia('Bisteca suína', 'Farofa de cenoura', 'Repolho com manga', 'Cocada cremosa'),
   ],
   [
-    dia('Frango desfiado', 'Creme de milho', 'Alface e cebola roxa'),
-    dia('Carne de panela c/ batatas', 'Abóbora refogada', 'Repolho roxo c/ alface'),
-    dia('Lombo suíno', 'Purê de abóbora', 'Alface / tomate'),
-    dia('Filé de frango à pizzaiolo', 'Macarrão', 'Cenoura e Batata cozida'),
-    dia('Picadinho c/ legumes', 'Farofa simples', 'Mix de folhas'),
-    dia('Linguiça acebolada', 'Mandioca cozida', 'Alface / tomate / Pepino'),
-    dia('Strogonoff de Carne', 'Batata palha', 'Cenoura / Beterraba ralada'),
+    dia('Filé de coxa no molho de tomate', 'Mandioca cozida', 'Repolho com alface', 'Fruta'),
+    dia('Carne moída', 'Purê de abóbora', 'Cenoura e beterraba ralada', 'Pudim de baunilha'),
+    dia('Linguiça assada', 'Purê de abóbora', 'Repolho com manga', 'Salada de frutas'),
+    dia('Feijoada com costelinha', 'Farofa de cenoura', 'Alface e tomate', 'Fruta'),
+    dia('Filé de frango grelhado', 'Batata frita', 'Mix de folhas com milho', 'Fruta'),
+    dia('Strogonoff de carne', 'Batata palha', 'Alface e tomate', 'Gelatina colorida'),
+    dia('Frango desfiado', 'Creme de milho', 'Alface e cenoura', 'Curau'),
   ],
   [
-    dia('Filé de coxa no molho de tomate', 'Purê de batata', 'Repolho c/ alface'),
-    dia('Carne desfiada', 'Abóbora refogada', 'Mix de folhas c/ milho'),
-    dia('Costelinha Suína', 'Farofa de banana', 'Alface / tomate'),
-    dia('Filé de frango grelhado', 'Creme de milho', 'Alface / cenoura'),
-    dia('Filé de peixe empanado', 'Mandioca cozida', 'Repolho c/ manga'),
-    dia('Churrasco de panela', 'Farofa de Cenoura', 'Alface / tomate / Pepino'),
-    dia('Filé de frango à parmegiana', 'Purê de batata', 'Mix de folhas'),
+    dia('Filé de peixe empanado', 'Purê de abóbora', 'Alface, tomate e pepino', 'Fruta'),
+    dia('Coxa e sobrecoxa assada', 'Farofa simples', 'Cenoura e beterraba ralada', 'Arroz-doce'),
+    dia('Picadinho com legumes', 'Purê de batata', 'Alface e cebola roxa', 'Gelatina cremosa'),
+    dia('Strogonoff de frango', 'Batata palha', 'Mix de folhas', 'Mousse de morango'),
+    dia('Churrasco de panela', 'Farofa de cenoura', 'Alface e tomate', 'Salada de frutas'),
+    dia('Lombo suíno', 'Farofa de banana', 'Repolho com alface', 'Fruta'),
+    dia('Feijoada com costelinha', 'Farofa simples', 'Cenoura e beterraba ralada', 'Cocada cremosa'),
   ],
   [
-    dia('Cubos de frango no molho', 'Purê de abóbora', 'Alface e cebola roxa'),
-    dia('Carne assada na manteiga', 'Mandioca cozida', 'Repolho roxo c/ alface'),
-    dia('Linguiça assada', 'Farofa simples', 'Cenoura / Beterraba ralada'),
-    dia('Strogonoff de frango', 'Batata palha', 'Alface / tomate'),
-    dia('Costela Bovina com mandioca', 'Farofa de Cenoura', 'Mix de folhas c/ milho'),
-    dia('Filé de frango à milanesa', 'Creme de milho', 'Alface / tomate / Pepino'),
-    dia('Carne de panela', 'Purê de abóbora', 'Repolho c/ manga'),
+    dia('Acém ao molho de tomate', 'Mandioca cozida', 'Cenoura e beterraba ralada', 'Fruta'),
+    dia('Filé de frango à parmegiana', 'Purê de abóbora', 'Alface e tomate', 'Fruta'),
+    dia('Lombo suíno', 'Farofa de banana', 'Repolho com manga', 'Pudim de leite'),
+    dia('Cubos de frango no molho', 'Purê de abóbora', 'Repolho com alface', 'Gelatina colorida'),
+    dia('Bisteca suína', 'Creme de milho', 'Alface, tomate e pepino', 'Fruta'),
+    dia('Tiras de frango com bacon', 'Abóbora refogada', 'Mix de folhas', 'Salada de frutas'),
+    dia('Carne desfiada', 'Mandioca cozida', 'Alface, tomate e pepino', 'Pudim de baunilha'),
   ],
 ];
+
+const FINAL_2026: DiaFixo[] = [
+  { ...CICLO[0][0], sobremesa: 'Fruta' },
+  { ...CICLO[0][1], sobremesa: 'Fruta' },
+  { ...CICLO[0][2], sobremesa: 'Pudim de baunilha' },
+  { ...CICLO[0][3], sobremesa: 'Gelatina colorida' },
+];
+
+const LC_LITROS_POR_PESSOA: Record<string, number> = {
+  'arroz-doce': 0.0138,
+  'mousse de maracuja': 0.02,
+  'gelatina cremosa': 0.0123,
+  'cocada cremosa': 0.022,
+  'mousse de morango': 0.0215,
+};
+
+const normalizarLocal = (texto: string) =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+export function litrosLeiteCondensadoPorPessoa(sobremesa: string): number {
+  return LC_LITROS_POR_PESSOA[normalizarLocal(sobremesa)] ?? 0;
+}
 
 function numeroSemana(id: string): number | null {
   const m = /^2026-S(\d{2})$/.exec(id);
@@ -57,10 +84,20 @@ function numeroSemana(id: string): number | null {
   return Number(m[1]);
 }
 
+export function semanaUsaBagLeiteCondensado(id: string): boolean {
+  const semana = numeroSemana(id);
+  if (semana === null || semana < 41 || semana > 52) return false;
+  const posicao = (semana - 41) % 4;
+  return posicao === 0 || posicao === 2;
+}
+
 export function cardapioFixoParaSemana(id: string): Array<DiaFixo | null> | null {
   const semana = numeroSemana(id);
   if (semana === null || semana < 41 || semana > 53) return null;
-  const base = CICLO[(semana - 41) % CICLO.length].map((d) => ({ ...d }));
-  if (semana === 53) return base.map((d, i) => (i <= 3 ? d : null));
-  return base;
+  if (semana === 53) {
+    return Array.from({ length: 7 }, (_, i) =>
+      i < FINAL_2026.length ? { ...FINAL_2026[i] } : null,
+    );
+  }
+  return CICLO[(semana - 41) % CICLO.length].map((d) => ({ ...d }));
 }

@@ -120,7 +120,7 @@ describe('governanca-candidatos', () => {
   it('distingue baseline aprendido automaticamente de ajuste humano', () => {
     expect(podeCalibrarDemandaAutomaticamente(72, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(true);
     expect(podeCalibrarDemandaAutomaticamente(74, 0, [72, 70, 70, 75, 80, 80, 80])).toBe(false);
-    expect(podeCalibrarDemandaAutomaticamente(55, 0)).toBe(true);
+    expect(podeCalibrarDemandaAutomaticamente(65, 0)).toBe(true);
     expect(podeCalibrarDemandaAutomaticamente(60, 0)).toBe(false);
   });
   it('normaliza desperdício por registro sem somar kg com porções', () => {

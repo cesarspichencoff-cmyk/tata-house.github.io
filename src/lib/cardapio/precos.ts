@@ -19,6 +19,38 @@ export interface PrecoResolvido {
   tipo: TipoPreco;
 }
 
+/** Referências internas mais recentes disponíveis para o ciclo out-dez/2026.
+ * Não são preço confirmado da semana: entram como referência até Compras
+ * aplicar a cotação real. Quando não há dado recente, o histórico antigo segue
+ * como fallback normal do motor. */
+const REFERENCIAS_RECENTES_2026: Record<string, number> = {
+  'acem': 32.49,
+  'bisteca suina': 14.98,
+  'lombo suino': 20.85,
+  'costelinha suina': 16.93,
+  'file de tilapia': 35.48,
+  'file de coxa': 12.69,
+  'file de frango': 16.64,
+  'file de peito': 16.64,
+  'peito de frango': 16.64,
+  'coxa de frango': 8.29,
+  'sobrecoxa': 10.49,
+  'coxa e sobre coxa': 9.39,
+  'abobora': 2.98,
+  'abobora moranga': 2.98,
+  'beterraba': 3.29,
+  'mandioca': 3.31,
+  'repolho': 5.87,
+  'melancia': 5.92,
+  'pepino': 6.58,
+  'cenoura': 7.03,
+  'abacaxi': 7.40,
+  'banana': 7.89,
+  'batata': 10.66,
+  'alface crespa': 15.30,
+  'fruta da semana': 7.06,
+};
+
 const unidadeDe = new Map<string, string>();
 DADOS.itens.forEach((i) => unidadeDe.set(normalizar(i.n), i.u));
 
@@ -302,8 +334,8 @@ function buscarHistorico(norm: string): number | null {
 
 /**
  * Resolve o preço de um item em quatro camadas de prioridade:
- * 1. real      — preço digitado pelo usuário para esta cotação
- * 2. historico — dados reais de Mai/Jun 2026 (exato ou por aproximação)
+ * 1. real      — preço digitado/aplicado pela operação
+ * 2. historico — referência interna recente; depois histórico de compras
  * 3. estimado  — estimativa de mercado gerada pelo usuário
  * 4. sem       — sem nenhuma referência (evitado ao máximo)
  * Antes de desistir, tenta o ingrediente base (preparo → cru).
@@ -316,6 +348,16 @@ export function resolverPreco(
 ): PrecoResolvido {
   const real = precos[norm];
   if (real > 0) return { valor: real, tipo: 'real' };
+
+  // A bag de 5 L precisa de cotação própria. O histórico antigo não prova o
+  // preço desta embalagem, então não o reaproveitamos como se fosse atual.
+  if (norm === 'leite condensado' || norm === 'leite condensado bag 5 l') {
+    const estLeite = estimativas[norm];
+    return estLeite > 0 ? { valor: estLeite, tipo: 'estimado' } : { valor: 0, tipo: 'sem' };
+  }
+
+  const recente = REFERENCIAS_RECENTES_2026[norm];
+  if (recente > 0) return { valor: recente, tipo: 'historico' };
   const hist = PRECOS_COMPRAS[norm] > 0 ? PRECOS_COMPRAS[norm] : buscarHistorico(norm);
   if (hist !== null && hist > 0) return { valor: hist, tipo: 'historico' };
   const est = estimativas[norm];

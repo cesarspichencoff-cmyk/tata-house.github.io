@@ -6,6 +6,7 @@
 import dadosJson from './dados.json';
 import { receitaDoPrato, RECEITAS_POR_CATEGORIA } from './receitas';
 import { DIAS_SEMANA, normalizar } from './texto';
+import { litrosLeiteCondensadoPorPessoa } from './cardapio-fixo-2026';
 import type {
   Aviso,
   DadosCardapio,
@@ -25,8 +26,8 @@ export { DIAS_SEMANA, normalizar };
 
 export const DADOS = dadosJson as unknown as DadosCardapio;
 
-/** Curva de movimento padrão: Seg/Ter menor, Qua/Qui média, Sex–Dom pico. */
-export const PESSOAS_PADRAO = [55, 55, 65, 65, 80, 80, 80];
+/** Média histórica recente de refeições: Seg → Dom. */
+export const PESSOAS_PADRAO = [65, 58, 65, 65, 64, 66, 91];
 
 /* ------------------------- proteína do prato ------------------------- */
 
@@ -444,6 +445,10 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
   /* ── 4. Fallback: completa com ingredientes citados no texto ─────── */
   const completa = (texto: string, categoria: string) => {
     if (!texto) return;
+    if (categoria === 'sobremesa' && normalizar(texto) === 'fruta') {
+      adiciona('Fruta da semana', 0.12 * DADOS.baseline, 'kg', 'fallback');
+      return;
+    }
     for (const parte of texto.split(/\s+com\s+|\s+e\s+|,|\+|·|\//i)) {
       const it = itemDoTexto(parte);
       if (!it) continue;
@@ -475,6 +480,19 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
   completa(dia.guarnicao, 'guarnicao');
   completa(dia.salada, 'salada');
   completa(dia.sobremesa, 'sobremesa');
+
+  // Nas sobremesas planejadas para a bag de 5 L, o consumo é controlado em
+  // litros por dia. Isso substitui unidades históricas ambíguas (un/bag) sem
+  // alterar pudins e outras sobremesas compradas prontas.
+  const leiteCondensadoPP = litrosLeiteCondensadoPorPessoa(dia.sobremesa);
+  if (leiteCondensadoPP > 0) {
+    acc.set(normalizar('Leite condensado'), {
+      item: 'Leite condensado',
+      unid: 'lt',
+      qtd: leiteCondensadoPP * DADOS.baseline,
+      fonte: 'receita',
+    });
+  }
 
   // garantia final: prato com carne descrita SEMPRE leva a proteína na lista
   if (dia.principal) {

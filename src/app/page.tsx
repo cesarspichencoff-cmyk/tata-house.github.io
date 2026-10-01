@@ -52,6 +52,7 @@ const AbaGastos = dynamic(() => import('@/components/cardapio/AbaGastos').then((
 import {
   deslocarSemana,
   idSemanaIso,
+  idsSemanas,
   lerSemana,
   periodoSemana,
   rotuloSemana,
@@ -476,8 +477,9 @@ export default function PaginaCardapios() {
   };
 
   const listaSemanas = useMemo(() => {
-    const set = new Set<string>();
-    for (let i = -2; i <= 8; i++) set.add(deslocarSemana(semanaAtualId, i));
+    const set = new Set<string>(idsSemanas());
+    set.add(deslocarSemana(semanaAtualId, -2));
+    set.add(deslocarSemana(semanaAtualId, -1));
     semanasComConteudo().forEach((id) => set.add(id));
     set.add(semanaId);
     return Array.from(set).sort();
