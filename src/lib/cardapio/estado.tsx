@@ -23,7 +23,7 @@ import {
 import { registrarVersao } from './historico-semana';
 import { estadoSemAnexosSemana, hidratarAnexosSemana, persistirAnexosSemana } from './anexos-semana';
 import { linhasDoDia, normalizar, PESSOAS_PADRAO } from './motor';
-import { PRECOS_COMPRAS } from './precos-compras';
+import { cardapioFixoParaSemana } from './cardapio-fixo-2026';
 import historicoPlanilhaJson from './historico-planilha.json';
 import {
   fatorEfetivo,
@@ -39,7 +39,6 @@ import { ehRemetenteInterno } from './cotacao';
 import {
   PERFIS_FORNECEDORES_SEED,
   MAPA_FORNECEDORES_SEED,
-  PRECOS_COTACAO_SEED,
   FUNCIONARIOS_SEED,
 } from './dados-seed';
 import { montarDossie, type DossieIA } from './dossie';
@@ -64,9 +63,10 @@ import type {
 
 const PREFIXO = 'cardapio.v1.';
 
-export function semanaVazia(): EstadoSemana {
+export function semanaVazia(semanaId?: string): EstadoSemana {
   // curva real aprendida com as contagens de refeições (quando existir)
   const medias = lerLocal<Record<number, RegistroAprendizado>>('mediaRefeicoes', {});
+  const fixo = semanaId ? cardapioFixoParaSemana(semanaId) : null;
   return {
     versao: 1,
     // Opt-in apenas em semanas NOVAS. Semanas já salvas não têm este campo e permanecem congeladas.
@@ -74,11 +74,11 @@ export function semanaVazia(): EstadoSemana {
     orcamento: null,
     dias: PESSOAS_PADRAO.map((pessoas, i) => ({
       pessoas: valorEfetivo(medias[i]) ? Math.round(valorEfetivo(medias[i])!) : pessoas,
-      principal: '',
-      guarnicaoFixa: 'Arroz e Feijão',
-      guarnicao: '',
-      salada: '',
-      sobremesa: '',
+      principal: fixo?.[i]?.principal ?? '',
+      guarnicaoFixa: fixo?.[i]?.guarnicaoFixa ?? 'Arroz e Feijão',
+      guarnicao: fixo?.[i]?.guarnicao ?? '',
+      salada: fixo?.[i]?.salada ?? '',
+      sobremesa: fixo?.[i]?.sobremesa ?? '',
     })),
     etapa: 'rascunho',
     historico: [],
@@ -237,13 +237,17 @@ export function rotuloSemana(id: string, numero?: number): string {
 export function idsSemanas(): string[] {
   const hoje = new Date();
   const ids: string[] = [];
-  // semana atual + 7 semanas à frente (planejamento sempre de seg a dom)
-  for (let off = 0; off <= 7; off++) {
+  const inicio = datasDaSemana(idSemanaIso(hoje))[0];
+  const fim2026 = datasDaSemana('2026-S53')[0];
+  const semanasAteFim = Math.ceil((fim2026.getTime() - inicio.getTime()) / (7 * 86400000));
+  const horizonte = inicio <= fim2026 ? Math.max(7, semanasAteFim) : 7;
+
+  for (let off = 0; off <= horizonte; off++) {
     const d = new Date(hoje);
     d.setDate(d.getDate() + off * 7);
     ids.push(idSemanaIso(d));
   }
-  return ids;
+  return Array.from(new Set(ids));
 }
 
 /** Datas (segunda → domingo) da semana ISO "2026-S24". */
@@ -305,16 +309,16 @@ export function gravarSemana(id: string, estado: EstadoSemana) {
 
 /** Lê o documento de uma semana sem montar hook (para indicadores mensais). */
 export function lerSemana(semanaId: string): EstadoSemana {
-  return lerLocal('semana.' + semanaId, semanaVazia());
+  return lerLocal('semana.' + semanaId, semanaVazia(semanaId));
 }
 
 export function useSemana(semanaId: string) {
-  const [estado, setEstado] = useState<EstadoSemana>(semanaVazia);
+  const [estado, setEstado] = useState<EstadoSemana>(() => semanaVazia(semanaId));
   const [pronto, setPronto] = useState(false);
 
   const recarregar = useCallback(() => {
     const chave = 'semana.' + semanaId;
-    const local = lerLocal(chave, semanaVazia());
+    const local = lerLocal(chave, semanaVazia(semanaId));
     setEstado(local);
     // Fotos antigas/legadas ficam fora do localStorage. Reidrata em segundo
     // plano sem permitir que uma leitura atrasada sobrescreva uma edição que
@@ -379,9 +383,9 @@ export function usePrecos() {
   const [precos, setPrecos] = useState<Record<string, number>>({});
 
   const recarregar = useCallback(() => {
-    // PRECOS_COMPRAS + PRECOS_COTACAO_SEED como base; entradas manuais têm prioridade.
-    const local = lerLocal('precos', {});
-    setPrecos({ ...PRECOS_COMPRAS, ...PRECOS_COTACAO_SEED, ...local });
+    // Somente preço lançado/aplicado pela operação é tratado como preço real.
+    // Histórico e seeds permanecem na camada de referência/estimativa.
+    setPrecos(lerLocal('precos', {}));
   }, []);
 
   useEffect(() => { recarregar(); }, [recarregar]);
