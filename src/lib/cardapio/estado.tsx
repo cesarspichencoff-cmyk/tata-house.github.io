@@ -307,11 +307,23 @@ export function gravarSemana(id: string, estado: EstadoSemana) {
   gravarLocal('semana.' + id, estado);
 }
 
+function semanaTemCardapioIniciado(estado: EstadoSemana): boolean {
+  return estado.dias.some((d) =>
+    Boolean(
+      d.principal.trim()
+      || d.guarnicao.trim()
+      || d.salada.trim()
+      || d.sobremesa.trim()
+      || (d.guarnicaoFixa.trim() && normalizar(d.guarnicaoFixa) !== normalizar('Arroz e Feijão')),
+    ),
+  );
+}
+
 /** Aplica o ciclo fixo somente quando a semana salva está totalmente vazia.
  *  Qualquer cardápio já iniciado pela operação continua autoritativo. */
 export function aplicarCardapioFixoSeVazio(semanaId: string, estado: EstadoSemana): EstadoSemana {
   const fixo = cardapioFixoParaSemana(semanaId);
-  if (!fixo || estado.dias.some((d) => d.principal.trim())) return estado;
+  if (!fixo || semanaTemCardapioIniciado(estado)) return estado;
 
   return {
     ...estado,
