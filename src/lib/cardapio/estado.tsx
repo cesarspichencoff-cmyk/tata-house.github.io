@@ -307,9 +307,25 @@ export function gravarSemana(id: string, estado: EstadoSemana) {
   gravarLocal('semana.' + id, estado);
 }
 
+/** Aplica o ciclo fixo somente quando a semana salva está totalmente vazia.
+ *  Qualquer cardápio já iniciado pela operação continua autoritativo. */
+export function aplicarCardapioFixoSeVazio(semanaId: string, estado: EstadoSemana): EstadoSemana {
+  const fixo = cardapioFixoParaSemana(semanaId);
+  if (!fixo || estado.dias.some((d) => d.principal.trim())) return estado;
+
+  return {
+    ...estado,
+    dias: estado.dias.map((d, i) => {
+      const padrao = fixo[i];
+      return padrao ? { ...d, ...padrao } : d;
+    }),
+  };
+}
+
 /** Lê o documento de uma semana sem montar hook (para indicadores mensais). */
 export function lerSemana(semanaId: string): EstadoSemana {
-  return lerLocal('semana.' + semanaId, semanaVazia(semanaId));
+  const salvo = lerLocal('semana.' + semanaId, semanaVazia(semanaId));
+  return aplicarCardapioFixoSeVazio(semanaId, salvo);
 }
 
 export function useSemana(semanaId: string) {
@@ -318,7 +334,10 @@ export function useSemana(semanaId: string) {
 
   const recarregar = useCallback(() => {
     const chave = 'semana.' + semanaId;
-    const local = lerLocal(chave, semanaVazia(semanaId));
+    const local = aplicarCardapioFixoSeVazio(
+      semanaId,
+      lerLocal(chave, semanaVazia(semanaId)),
+    );
     setEstado(local);
     // Fotos antigas/legadas ficam fora do localStorage. Reidrata em segundo
     // plano sem permitir que uma leitura atrasada sobrescreva uma edição que

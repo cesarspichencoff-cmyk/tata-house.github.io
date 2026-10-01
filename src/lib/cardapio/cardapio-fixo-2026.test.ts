@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cardapioFixoParaSemana } from './cardapio-fixo-2026';
+import { aplicarCardapioFixoSeVazio, semanaVazia } from './estado';
 import { listaDoDia, proteinaDoPrato, validarSemana } from './motor';
 
 const comPessoas = (semana: NonNullable<ReturnType<typeof cardapioFixoParaSemana>>) =>
@@ -33,6 +34,18 @@ describe('cardápio fixo out-dez/2026', () => {
       expect(avisos.filter((a) => a.nivel === 'erro')).toEqual([]);
     }
   });
+  it('preenche documento salvo vazio sem sobrescrever semana já iniciada', () => {
+    const vazio = semanaVazia();
+    const preenchido = aplicarCardapioFixoSeVazio('2026-S41', vazio);
+    expect(preenchido.dias[0].principal).toBe('Cubos de frango no molho');
+
+    const iniciado = semanaVazia();
+    iniciado.dias[0].principal = 'Exceção operacional';
+    const preservado = aplicarCardapioFixoSeVazio('2026-S41', iniciado);
+    expect(preservado.dias[0].principal).toBe('Exceção operacional');
+    expect(preservado.dias[1].principal).toBe('');
+  });
+
   it('gera lista de compras para todos os 28 dias do ciclo', () => {
     for (let semana = 41; semana <= 44; semana++) {
       const fixo = cardapioFixoParaSemana(`2026-S${semana}`)!;
