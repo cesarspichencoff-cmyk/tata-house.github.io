@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { estimarPreco } from './precos';
+import { PRECOS_COTACAO_SEED } from './dados-seed';
 import type { HistoricoPrecos } from './tipos';
 
 const PREFIXO = 'cardapio.v1.';
@@ -34,7 +35,8 @@ export function useEstimativas() {
   const [estimativas, setEstimativas] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    setEstimativas(ler('estimativas', {}));
+    // Seeds históricos são referência, nunca preço real confirmado da semana.
+    setEstimativas({ ...PRECOS_COTACAO_SEED, ...ler('estimativas', {}) });
   }, []);
 
   /** Define/atualiza manualmente a estimativa de um item (0/null remove). */

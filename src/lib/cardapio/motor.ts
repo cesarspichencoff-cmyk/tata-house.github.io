@@ -37,7 +37,7 @@ const REGRAS_PROTEINA: [Proteina, RegExp][] = [
   ],
   [
     'suina',
-    /suin|porco|bisteca|lombo|pernil|costelinha|calabresa|toscana|feijoada|panceta|barriga|joelho/,
+    /suin|porco|bisteca|lombo|pernil|costelinha|linguica|calabresa|toscana|feijoada|panceta|barriga|joelho/,
   ],
   ['peixe', /peixe|tilapia|merluza|sardinha|bacalhau|pescad|file de panga/],
   ['ovo', /\bovo\b|\bovos\b|omelete/],
@@ -406,6 +406,14 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
           const k = normalizar(ing.item);
           // complemento de guarnição citado no nome do principal não entra por aqui
           if (campo === 'principal' && ehComplemento(ing.item)) return;
+          // Proteína principal já coberta por fonte operacional: receita só
+          // complementa ingredientes, nunca duplica o mesmo corte/família.
+          const protIng = proteinaDoPrato(ing.item);
+          if (
+            campo === 'principal' &&
+            protIng !== 'outros' &&
+            Array.from(acc.values()).some((v) => proteinaDoPrato(v.item) === protIng)
+          ) return;
           // só adiciona se ainda não está coberto pelo histórico operacional
           if (acc.has(k)) return;
           // Quantidade ínfima por pessoa = tempero/condimento = pantry item
@@ -454,6 +462,11 @@ export function listaDoDia(dia: DiaCardapio, fatores?: Record<string, number>, o
       });
       if (coberto) continue;
       const prot = proteinaDoPrato(it.n);
+      if (
+        categoria === 'principal' &&
+        prot !== 'outros' &&
+        Array.from(acc.values()).some((v) => proteinaDoPrato(v.item) === prot)
+      ) continue;
       adiciona(it.n, qtdPadraoPorPessoa(categoria, it.u, prot !== 'outros' ? prot : null) * DADOS.baseline, it.u, 'fallback');
     }
   };
