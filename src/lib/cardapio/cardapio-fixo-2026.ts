@@ -7,11 +7,9 @@ const BASE = 'Arroz e Feijão';
 const normalizarLocal = (texto: string) =>
   texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-const comFruta = (sobremesa: string): string => {
-  const norm = normalizarLocal(sobremesa);
-  if (norm === 'fruta' || norm === 'salada de frutas') return sobremesa;
-  return `${sobremesa} + Fruta`;
-};
+export function sobremesaSemFrutaAutomatica(sobremesa: string): string {
+  return sobremesa.replace(/\s*\+\s*fruta\s*$/i, '').trim();
+}
 
 const dia = (
   principal: string,
@@ -23,7 +21,7 @@ const dia = (
   guarnicaoFixa: BASE,
   guarnicao,
   salada,
-  sobremesa: comFruta(sobremesa),
+  sobremesa,
 });
 
 const CICLO: DiaFixo[][] = [
@@ -68,8 +66,8 @@ const CICLO: DiaFixo[][] = [
 const FINAL_2026: DiaFixo[] = [
   { ...CICLO[0][0], sobremesa: 'Fruta' },
   { ...CICLO[0][1], sobremesa: 'Fruta' },
-  { ...CICLO[0][2], sobremesa: comFruta('Pudim de baunilha') },
-  { ...CICLO[0][3], sobremesa: comFruta('Gelatina colorida') },
+  { ...CICLO[0][2], sobremesa: 'Pudim de baunilha' },
+  { ...CICLO[0][3], sobremesa: 'Gelatina colorida' },
 ];
 
 const LC_LITROS_POR_PESSOA: Record<string, number> = {
@@ -89,6 +87,15 @@ function numeroSemana(id: string): number | null {
   const m = /^2026-S(\d{2})$/.exec(id);
   if (!m) return null;
   return Number(m[1]);
+}
+
+/** Semana de outubro usada como modelo de quantidade para as semanas
+ *  completas de nov/dez que repetem exatamente o mesmo ciclo. */
+export function semanaModeloOutubroPara(id: string): string | null {
+  const semana = numeroSemana(id);
+  if (semana === null || semana < 45 || semana > 52) return null;
+  const fonte = 41 + ((semana - 41) % 4);
+  return `2026-S${String(fonte).padStart(2, '0')}`;
 }
 
 export function semanaUsaBagLeiteCondensado(id: string): boolean {
