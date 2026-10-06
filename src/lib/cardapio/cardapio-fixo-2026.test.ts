@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cardapioFixoParaSemana, semanaUsaBagLeiteCondensado } from './cardapio-fixo-2026';
+import { cardapioFixoParaSemana, semanaModeloOutubroPara, semanaUsaBagLeiteCondensado, sobremesaSemFrutaAutomatica } from './cardapio-fixo-2026';
 import { aplicarCardapioFixoSeVazio, idsSemanas, semanaVazia } from './estado';
 import { listaDoDia, PESSOAS_PADRAO, proteinaDoPrato, validarSemana } from './motor';
 import { resolverPreco } from './precos';
@@ -8,12 +8,17 @@ const comPessoas = (semana: NonNullable<ReturnType<typeof cardapioFixoParaSemana
   semana.flatMap((d, i) => d ? [{ pessoas: PESSOAS_PADRAO[i], ...d }] : []);
 
 describe('cardápio fixo out-dez/2026', () => {
-  it('inicia em 05/10/2026 e repete o ciclo a cada 4 semanas', () => {
+  it('inicia em 05/10/2026 e repete o ciclo de outubro até dezembro', () => {
     const s41 = cardapioFixoParaSemana('2026-S41');
+    const s44 = cardapioFixoParaSemana('2026-S44');
     const s45 = cardapioFixoParaSemana('2026-S45');
+    const s49 = cardapioFixoParaSemana('2026-S49');
+    const s52 = cardapioFixoParaSemana('2026-S52');
 
     expect(s41).not.toBeNull();
     expect(s45).toEqual(s41);
+    expect(s49).toEqual(s41);
+    expect(s52).toEqual(s44);
     expect(s41?.[0]?.principal).toBe('Carne de panela com batatas');
   });
   it('termina em 31/12 sem criar cardápio para janeiro', () => {
@@ -21,7 +26,7 @@ describe('cardápio fixo out-dez/2026', () => {
 
     expect(s53?.slice(0, 4).every(Boolean)).toBe(true);
     expect(s53?.slice(0, 4).map((d) => d?.sobremesa)).toEqual([
-      'Fruta', 'Fruta', 'Pudim de baunilha + Fruta', 'Gelatina colorida + Fruta',
+      'Fruta', 'Fruta', 'Pudim de baunilha', 'Gelatina colorida',
     ]);
     expect(s53?.slice(4)).toEqual([null, null, null]);
     expect(semanaUsaBagLeiteCondensado('2026-S53')).toBe(false);
@@ -143,35 +148,42 @@ describe('cardápio fixo out-dez/2026', () => {
     expect(referencia.valor).toBeGreaterThan(0);
   });
 
-  it('oferece fruta todos os dias sem duplicar os dias que já são de fruta', () => {
-    for (let semana = 41; semana <= 44; semana++) {
-      const dias = comPessoas(cardapioFixoParaSemana(`2026-S${semana}`)!);
-      for (const dia of dias) {
-        expect(dia.sobremesa.toLowerCase()).toContain('fruta');
-        const frutasGenericas = listaDoDia(dia).filter((i) => i.item === 'Fruta da semana');
-        if (dia.sobremesa === 'Salada de frutas') {
-          expect(frutasGenericas).toHaveLength(0);
-        } else {
-          expect(frutasGenericas).toHaveLength(1);
-          expect(frutasGenericas[0].unid).toBe('kg');
-          expect(frutasGenericas[0].qtd).toBeGreaterThan(0);
-        }
-      }
+  it('mantém cada sobremesa exatamente como especificada, sem acrescentar fruta', () => {
+    const s41 = cardapioFixoParaSemana('2026-S41')!;
+    expect(s41.map((d) => d?.sobremesa)).toEqual([
+      'Arroz-doce',
+      'Fruta',
+      'Mousse de maracujá',
+      'Gelatina cremosa',
+      'Fruta',
+      'Fruta',
+      'Cocada cremosa',
+    ]);
+
+    for (let semana = 41; semana <= 52; semana++) {
+      const fixo = cardapioFixoParaSemana(`2026-S${semana}`)!;
+      expect(fixo.every((d) => !d?.sobremesa.match(/\+\s*fruta\s*$/i))).toBe(true);
     }
+
+    const segunda = { pessoas: PESSOAS_PADRAO[0], ...s41[0]! };
+    const terca = { pessoas: PESSOAS_PADRAO[1], ...s41[1]! };
+    expect(listaDoDia(segunda).some((i) => i.item === 'Fruta da semana')).toBe(false);
+    expect(listaDoDia(terca).some((i) => i.item === 'Fruta da semana')).toBe(true);
   });
 
-  it('adiciona fruta sem perder a receita-base da sobremesa', () => {
-    const fixo = cardapioFixoParaSemana('2026-S53')![2]!;
-    const comComplemento = { pessoas: PESSOAS_PADRAO[2], ...fixo };
-    const semComplemento = { ...comComplemento, sobremesa: 'Pudim de baunilha' };
+  it('remove somente o sufixo legado + Fruta e preserva sobremesas corretas', () => {
+    expect(sobremesaSemFrutaAutomatica('Pudim de baunilha + Fruta')).toBe('Pudim de baunilha');
+    expect(sobremesaSemFrutaAutomatica('Gelatina colorida + fruta ')).toBe('Gelatina colorida');
+    expect(sobremesaSemFrutaAutomatica('Fruta')).toBe('Fruta');
+    expect(sobremesaSemFrutaAutomatica('Salada de frutas')).toBe('Salada de frutas');
+  });
 
-    const semFruta = listaDoDia(semComplemento);
-    const comFruta = listaDoDia(comComplemento);
-    const somenteBase = (itens: ReturnType<typeof listaDoDia>) =>
-      itens.filter((i) => i.item !== 'Fruta da semana');
-
-    expect(somenteBase(comFruta)).toEqual(somenteBase(semFruta));
-    expect(comFruta.some((i) => i.item === 'Fruta da semana')).toBe(true);
+  it('usa as quatro semanas de outubro como modelo de quantidade nas semanas equivalentes', () => {
+    expect(semanaModeloOutubroPara('2026-S45')).toBe('2026-S41');
+    expect(semanaModeloOutubroPara('2026-S46')).toBe('2026-S42');
+    expect(semanaModeloOutubroPara('2026-S49')).toBe('2026-S41');
+    expect(semanaModeloOutubroPara('2026-S52')).toBe('2026-S44');
+    expect(semanaModeloOutubroPara('2026-S53')).toBeNull();
   });
 
   it('concentra uma bag de até 5 L só nas semanas 1 e 3, sem abrir bag no fechamento', () => {
