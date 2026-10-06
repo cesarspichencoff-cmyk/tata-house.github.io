@@ -22,7 +22,7 @@ import {
   marcarBootNuvemConcluido,
   aguardarBootNuvem,
 } from '@/lib/cardapio/supabase';
-import { notificarChaveExterna } from '@/lib/cardapio/estado';
+import { notificarChaveExterna, semanaVazia } from '@/lib/cardapio/estado';
 import {
   absorverEstadoGrandeLocal,
   aplicarEstadoGrandeDaNuvem,
@@ -36,6 +36,8 @@ import { adicionarEcoRecente, ehEcoProprio, serializarCanonico, type EcoRecente 
 import { ehChaveConcorrente, mesclarDocumentoConcorrenteSeguro, selecionarBaseConcorrente } from '@/lib/cardapio/sync-concorrente';
 import { definirArmazenamentoLocalCheio } from '@/lib/cardapio/aviso-armazenamento';
 import { mesclarSemana } from '@/lib/cardapio/merge-semana';
+import { listaDoDia, normalizar } from '@/lib/cardapio/motor';
+import { semanaModeloOutubroPara, sobremesaSemFrutaAutomatica } from '@/lib/cardapio/cardapio-fixo-2026';
 import { registrarVersao } from '@/lib/cardapio/historico-semana';
 import { estadoSemAnexosSemana, hidratarAnexosSemana, persistirAnexosSemana } from '@/lib/cardapio/anexos-semana';
 import {
@@ -48,6 +50,81 @@ import type { EstadoSemana } from '@/lib/cardapio/tipos';
 
 const PREFIXO = 'cardapio.v1.';
 const ig = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+function lerSemanaCardapio2026(id: string): EstadoSemana | null {
+  try {
+    const raw = localStorage.getItem(PREFIXO + 'semana.' + id);
+    return raw ? (JSON.parse(raw) as EstadoSemana) : null;
+  } catch {
+    return null;
+  }
+}
+
+function salvarSemanaCardapio2026(id: string, anterior: EstadoSemana | null, nova: EstadoSemana) {
+  if (anterior && ig(anterior, nova)) return;
+  const chave = 'semana.' + id;
+  if (anterior) registrarVersao(chave, anterior, 'local');
+  localStorage.setItem(PREFIXO + chave, JSON.stringify(nova));
+  notificarChaveExterna(chave);
+}
+
+/** Correção pontual de out–dez/2026.
+ *  Remove apenas o "+ Fruta" automático e replica somente quantidades (qtd)
+ *  ainda ausentes, usando as quatro semanas corrigidas de outubro como modelo.
+ *  Status, histórico, observações, remoções, unidades, notas e demais campos
+ *  nunca são copiados nem sobrescritos. */
+function corrigirCardapioOutDez2026() {
+  for (let semana = 41; semana <= 53; semana++) {
+    const id = `2026-S${String(semana).padStart(2, '0')}`;
+    const atual = lerSemanaCardapio2026(id);
+    if (!atual) continue;
+
+    let mudou = false;
+    const dias = atual.dias.map((dia) => {
+      const sobremesa = sobremesaSemFrutaAutomatica(dia.sobremesa);
+      if (sobremesa === dia.sobremesa) return dia;
+      mudou = true;
+      return { ...dia, sobremesa };
+    });
+    if (mudou) salvarSemanaCardapio2026(id, atual, { ...atual, dias });
+  }
+
+  // S45–S52 repetem exatamente S41–S44. Se alguém já corrigiu a quantidade
+  // no mês de destino, ela prevalece. Só preenche qtd ainda ausente.
+  for (let semana = 45; semana <= 52; semana++) {
+    const id = `2026-S${String(semana).padStart(2, '0')}`;
+    const fonteId = semanaModeloOutubroPara(id);
+    if (!fonteId) continue;
+    const fonte = lerSemanaCardapio2026(fonteId);
+    if (!fonte) continue;
+
+    const anterior = lerSemanaCardapio2026(id);
+    const destino = anterior ?? semanaVazia(id);
+    let mudou = false;
+    const ajustes = { ...destino.ajustes };
+
+    for (let diaIdx = 0; diaIdx < 7; diaIdx++) {
+      const daFonte = fonte.ajustes[diaIdx] ?? {};
+      const chavesValidas = new Set(
+        listaDoDia(destino.dias[diaIdx]).map((item) => normalizar(item.item)),
+      );
+      let doDestino = ajustes[diaIdx] ? { ...ajustes[diaIdx] } : null;
+
+      for (const [chave, ajusteFonte] of Object.entries(daFonte)) {
+        if (ajusteFonte.qtd === undefined || !chavesValidas.has(chave)) continue;
+        const ajusteDestino = doDestino?.[chave];
+        if (ajusteDestino?.qtd !== undefined) continue;
+        if (!doDestino) doDestino = {};
+        doDestino[chave] = { ...(ajusteDestino ?? {}), qtd: ajusteFonte.qtd };
+        mudou = true;
+      }
+
+      if (doDestino) ajustes[diaIdx] = doDestino;
+    }
+
+    if (mudou) salvarSemanaCardapio2026(id, anterior, { ...destino, ajustes });
+  }
+}
 
 export function BootNuvem() {
   useEffect(() => {
@@ -108,6 +185,16 @@ export function BootNuvem() {
         localStorage.setItem(MARCA_REPARO, '1'); // chave "__": não vai à nuvem
       } catch {
         /* reparo é um extra: nunca atrapalha o resto */
+      }
+    });
+
+    // Corrige o cardápio out–dez somente depois da reconciliação inicial,
+    // para trabalhar sobre os dados reais da equipe e não sobre cache antigo.
+    void aguardarBootNuvem().then(() => {
+      try {
+        corrigirCardapioOutDez2026();
+      } catch {
+        /* correção pontual nunca bloqueia o restante do app */
       }
     });
 
